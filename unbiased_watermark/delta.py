@@ -41,5 +41,7 @@ class Delta_Reweight(AbstractReweight):
         cumsum = torch.cumsum(F.softmax(p_logits, dim=-1), dim=-1)
         index = torch.searchsorted(cumsum, code.u[..., None], right=True)
         index = torch.clamp(index, 0, p_logits.shape[-1] - 1)
-        modified_logits = p_logits - 1e3 * (torch.arange(p_logits.shape[-1]) != index)
+        modified_logits = p_logits - 1e3 * (
+            torch.arange(p_logits.shape[-1], device=p_logits.device) != index
+        )
         return modified_logits

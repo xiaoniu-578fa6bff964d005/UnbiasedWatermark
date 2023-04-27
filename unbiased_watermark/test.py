@@ -638,13 +638,20 @@ class Gamma_Test(unittest.TestCase):
         from . import LLR_Score
         import math
 
-        rng = [torch.Generator(), torch.Generator()]
+        rng = [torch.Generator(), torch.Generator(), torch.Generator()]
         rng[0].manual_seed(5)
         rng[1].manual_seed(1)
+        rng[2].manual_seed(2)
         code = Gamma_WatermarkCode.from_random(rng, 4)
-        self.assertEqual(code.shuffle.tolist(), [[3, 1, 0, 2], [1, 3, 2, 0]])
+        self.assertEqual(
+            code.shuffle.tolist(), [[3, 1, 0, 2], [1, 3, 2, 0], [0, 1, 3, 2]]
+        )
         reweight = Gamma_Reweight(0)
-        p_logits = torch.log(torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]]))
+        p_logits = torch.log(
+            torch.tensor(
+                [[0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]]
+            )
+        )
         q_logits = reweight.reweight_logits(code, p_logits)
         self.assertTrue(
             torch.allclose(
@@ -656,7 +663,7 @@ class Gamma_Test(unittest.TestCase):
             torch.allclose(
                 torch.clamp(score.score(p_logits, q_logits), -100, 100),
                 torch.clamp(
-                    torch.tensor([[0.0, 0, 0, 0], [0.0, 0, 0, 0]]),
+                    torch.tensor([[0.0, 0, 0, 0], [0.0, 0, 0, 0], [0.0, 0, 0, 0]]),
                     -100,
                     100,
                 ),
@@ -664,19 +671,6 @@ class Gamma_Test(unittest.TestCase):
             )
         )
 
-    #  def test_2(self):
-    #      from . import LLR_Score
-    #
-    #      rng = random.Random(0)
-    #      code = Gamma_WatermarkCode.from_random(rng, 4)
-    #      self.assertEqual(code.shuffle.tolist(), [2, 0, 1, 3])
-    #      reweight = Gamma_Reweight(0.5)
-    #      p = np.array([0.1, 0.2, 0.4, 0.3])
-    #      q = reweight.reweight(code, p)
-    #      score = LLR_Score()
-    #      self.assertTrue(
-    #          np.allclose(score.score(p, q), np.log([1 / 2, 3 / 2, 1 / 2, 3 / 2]))
-    #      )
     def test_2(self):
         from . import LLR_Score
         import math
@@ -712,13 +706,20 @@ class Gamma_Test(unittest.TestCase):
         from . import LLR_Score
         import math
 
-        rng = [torch.Generator(), torch.Generator()]
+        rng = [torch.Generator(), torch.Generator(), torch.Generator()]
         rng[0].manual_seed(5)
         rng[1].manual_seed(1)
+        rng[2].manual_seed(2)
         code = Gamma_WatermarkCode.from_random(rng, 4)
-        self.assertEqual(code.shuffle.tolist(), [[3, 1, 0, 2], [1, 3, 2, 0]])
+        self.assertEqual(
+            code.shuffle.tolist(), [[3, 1, 0, 2], [1, 3, 2, 0], [0, 1, 3, 2]]
+        )
         reweight = Gamma_Reweight(0.5)
-        p_logits = torch.log(torch.tensor([[0.2, 0.1, 0.3, 0.4], [0.2, 0.1, 0.3, 0.4]]))
+        p_logits = torch.log(
+            torch.tensor(
+                [[0.2, 0.1, 0.3, 0.4], [0.2, 0.1, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]]
+            )
+        )
         q_logits = reweight.reweight_logits(code, p_logits)
         score = LLR_Score()
         self.assertTrue(
@@ -738,6 +739,12 @@ class Gamma_Test(unittest.TestCase):
                                 math.log(1 / 2),
                                 math.log(3 / 2),
                                 math.log(1 / 2),
+                            ],
+                            [
+                                math.log(1 / 2),
+                                math.log(1 / 2),
+                                math.log(3 / 2),
+                                math.log(1),
                             ],
                         ]
                     ),
@@ -806,7 +813,7 @@ class OPT_Test(unittest.TestCase):
         from transformers import pipeline, set_seed, LogitsProcessorList
 
         generator = pipeline(
-            "text-generation", model="facebook/opt-1.3b", do_sample=True
+            "text-generation", model="facebook/opt-1.3b", do_sample=True, device=0
         )
         prompt = "Count to 100: 1,2,3,4,5,6"
 
@@ -817,8 +824,10 @@ class OPT_Test(unittest.TestCase):
             PrevN_ContextCodeExtractor,
         )
 
-        cs = generator(prompt, max_length=30, num_return_sequences=5, do_sample=True)
-        for c in cs:
+        results1 = generator(
+            prompt, max_length=30, num_return_sequences=5, do_sample=True
+        )
+        for c in results1:
             print(c["generated_text"])
         print("=====")
         watermark_processor = WatermarkLogitsProcessor(
@@ -827,14 +836,14 @@ class OPT_Test(unittest.TestCase):
             PrevN_ContextCodeExtractor(5),
         )
         set_seed(42)
-        cs = generator(
+        results2 = generator(
             prompt,
             max_length=30,
             num_return_sequences=5,
             do_sample=True,
             logits_processor=LogitsProcessorList([watermark_processor]),
         )
-        for c in cs:
+        for c in results2:
             print(c["generated_text"])
         print("=====")
         watermark_processor = WatermarkLogitsProcessor(
@@ -843,12 +852,12 @@ class OPT_Test(unittest.TestCase):
             PrevN_ContextCodeExtractor(5),
         )
         set_seed(42)
-        cs = generator(
+        results3 = generator(
             prompt,
             max_length=30,
             num_return_sequences=5,
             do_sample=True,
             logits_processor=LogitsProcessorList([watermark_processor]),
         )
-        for c in cs:
+        for c in results3:
             print(c["generated_text"])
