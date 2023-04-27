@@ -40,21 +40,21 @@ class WatermarkLogitsProcessor(LogitsProcessor):
             self.context_code_extractor.extract(input_ids[i]) for i in range(batch_size)
         ]
 
-        def rand_rng():
-            rng = torch.Generator(device=scores.device)
-            rng.seed()
-            return rng
-
-        rng = [
-            torch.Generator(device=scores.device).manual_seed(
-                self.get_rng_seed(context_code)
-            )
-            if context_code not in self.cc_history
-            else rand_rng()
-            for context_code in context_codes
-        ]
+        mask, rng = zip(
+            *[
+                (
+                    context_code in self.cc_history,
+                    torch.Generator(device=scores.device).manual_seed(
+                        self.get_rng_seed(context_code)
+                    ),
+                )
+                for context_code in context_codes
+            ]
+        )
+        rng = list(rng)
+        mask = torch.tensor(mask, device=scores.device)
         watermark_code = self.reweight.watermark_code_type.from_random(
             rng, scores.size(1)
         )
         reweighted_scores = self.reweight.reweight_logits(watermark_code, scores)
-        return reweighted_scores
+        return torch.where(mask[:, None], scores, reweighted_scores)
