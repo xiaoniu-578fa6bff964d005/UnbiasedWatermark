@@ -45,5 +45,5 @@ class LLR_Score(AbstractScore):
 class AbstractContextCodeExtractor(ABC):
     @abstractmethod
     def extract(self, context: LongTensor) -> any:
-        """Should return a context code `c` which could be used to initialize a torch.Generator."""
+        """Should return a context code `c` which will be used to initialize a torch.Generator."""
         pass
