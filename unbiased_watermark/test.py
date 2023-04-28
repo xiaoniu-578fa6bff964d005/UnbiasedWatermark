@@ -797,44 +797,35 @@ class LLM_Test(unittest.TestCase):
                 prompt,
                 **kwargs,
             )
-            for c in results:
-                print(c["generated_text"])
+            return [r["generated_text"] for r in results]
 
-        run(
-            logits_processor=LogitsProcessorList([TemperatureLogitsWarper(temperature)])
-        )
-        print("=====")
-        watermark_processor = WatermarkLogitsProcessor(
+        delta_wp = WatermarkLogitsProcessor(
             b"private key",
             Delta_Reweight(),
             PrevN_ContextCodeExtractor(5),
         )
-        run(
-            logits_processor=LogitsProcessorList(
-                [TemperatureLogitsWarper(temperature), watermark_processor]
-            )
-        )
-        print("=====")
-        watermark_processor = WatermarkLogitsProcessor(
+        gamma_wp = WatermarkLogitsProcessor(
             b"private key",
-            Gamma_Reweight(0.1),
+            Gamma_Reweight(1),
             PrevN_ContextCodeExtractor(5),
         )
-        run(
-            logits_processor=LogitsProcessorList(
-                [TemperatureLogitsWarper(temperature), watermark_processor]
-            )
+        print(
+            f"""{{
+            "no": {repr(run(logits_processor=LogitsProcessorList([TemperatureLogitsWarper(temperature)])))},
+            "delta": {repr(run(logits_processor=LogitsProcessorList([TemperatureLogitsWarper(temperature), delta_wp])))},
+            "gamma": {repr(run(logits_processor=LogitsProcessorList([TemperatureLogitsWarper(temperature), gamma_wp])))},
+        }}"""
         )
 
     def test_opt_1(self):
-        # if no gpu, return
         if not torch.cuda.is_available():
             return
         self.generation_test(
             model="facebook/opt-1.3b",
-            prompt="list(range(10))=[0,1,2",
+            prompt="Hello, I'm",
             max_length=40,
             device=0,
+            temperature=0.4,
         )
 
     def test_gpt2_1(self):
@@ -846,9 +837,7 @@ class LLM_Test(unittest.TestCase):
             prompt="list(range(10))=[0,1,2",
         )
 
-    def score_test(
-        self, model="gpt2", text="list(range(10))=[0,1,2", temperature=0.2, **kwargs
-    ):
+    def score_test(self, model="gpt2", texts={}, temperature=0.2, prompt="", **kwargs):
         from transformers import (
             pipeline,
             set_seed,
@@ -868,6 +857,8 @@ class LLM_Test(unittest.TestCase):
             model=model,
             **kwargs,
         )
+        prompt_len = len(generator.tokenizer.encode(prompt))
+
         delta_wp = WatermarkLogitsProcessor(
             b"private key",
             Delta_Reweight(),
@@ -880,30 +871,60 @@ class LLM_Test(unittest.TestCase):
         )
         llr_score = LLR_Score()
         robust_llr_score = RobustLLR_Score(0.1, 0.1)
-        print("Text: ", text)
-        for wp_name, wp in [("delta", delta_wp), ("gamma", gamma_wp)]:
-            for score_name, score in [
-                ("llr", llr_score),
-                ("robust_llr", robust_llr_score),
-            ]:
-                scores = get_score(
-                    text,
-                    wp,
-                    score,
-                    generator.model,
-                    generator.tokenizer,
-                    temperature=temperature,
-                )
-                print(f"WP: {wp_name}, Score: {score_name}, Sum: {sum(scores[1:])}")
+        for k in texts:
+            print(f"==={k}===")
+            for text in texts[k]:
+                print("Text: ", text)
+                for wp_name, wp in [("delta", delta_wp), ("gamma", gamma_wp)]:
+                    for score_name, score in [
+                        ("llr", llr_score),
+                        ("r_llr", robust_llr_score),
+                    ]:
+                        scores = get_score(
+                            text,
+                            wp,
+                            score,
+                            generator.model,
+                            generator.tokenizer,
+                            temperature=temperature,
+                        )
+                        wp.reset_history()
+                        sum_score = sum(scores[max(1, prompt_len) :])
+                        print(f"{wp_name}\t{score_name}\t{sum_score}")
+                        #  if k == "delta" and wp_name == "delta":
+                        #      print("scores: ", scores)
 
     def test_gpt2_2(self):
-        text = "list(range(10))=[0,1,2,3]"
-        self.score_test(model="gpt2", text=text)
+        texts = {"no": ["list(range(10))=[0,1,2,3]"]}
+        self.score_test(model="gpt2", texts=texts)
 
     def test_opt_2(self):
-        text = "list(range(10))=[0,1,2,3]"
+        texts = {
+            "no": [
+                "Hello, I'm interested in the following:  * Moon HA Mudkip * Moon HA Totodile * Moon HA Larvitar * Moon HA Mudkip * Moon HA Timid HA",
+                "Hello, I'm interested in the following:  - Lure Ball HA Chimchar (Bold, 4EMs) - Lure Ball HA Gible (Bold, 4EMs)",
+                "Hello, I'm a new player and I've been playing for about a week. I've been playing on the same server for a while but I'm just starting to get into it. I'm",
+                "Hello, I'm new to this sub. I think I'm going to post a lot of my work here. I'm a graphic designer and I'm looking for a job. I'm not sure",
+                "Hello, I'm interested in the following:  * Moon Ball HA Dratini * Moon Ball HA Dratini * Moon Ball HA Tepig * Moon Ball HA Lileep * Moon",
+            ],
+            "delta": [
+                "Hello, I'm a new player, I'm currently in the process of making a character, I have a level 11 wizard, I'm trying to decide between a wizard and a cleric, I've",
+                "Hello, I'm interested in your HA Torchic and Friend Ball Scyther. I have a DBHA Dratini, DBHA Porygon, DBHA Omanyte, DBHA O",
+                "Hello, I'm a new player and I have a question. I am currently farming the last stage of the event, and I have a question. I'm trying to get the golden ticket, but",
+                "Hello, I'm new here. I'm a bit confused. I've been on this sub for a while now, but I don't understand what's going on.\nThis is a sub for",
+                "Hello, I'm interested in the Dior lipsticks. How much are you asking for them?\nHi! I'm not sure what the current price is on them, but I'd be happy",
+            ],
+            "gamma": [
+                "Hello, I'm interested in the following:  * HA Scatterbug * HA Treecko * HA Vulpix * HA Turtwig * HA Mudkip * HA Mudkip *",
+                "Hello, I'm interested in the following:  -  * DBHA Lileep  - DBHA Snivy  - DBHA Tangela  - DBHA Vulpix ",
+                "Hello, I'm a new player to the game and I'm looking to join a guild. I have a level 28 priest, and I'm looking to join a guild that is active and has a",
+                "Hello, I'm new to the game and I think I'm going to buy the game for the first time. I'm looking for a guild to join. I'm a healer and I'm looking",
+                "Hello, I'm interested in the following:  * Moon Ball HA Vulpix * Moon Ball HA Dratini * Moon Ball HA Corphish * Moon Ball HA Lileep * Moon",
+            ],
+        }
         self.score_test(
-            model="gpt2",
-            text=text,
+            model="facebook/opt-1.3b",
+            texts=texts,
+            prompt="Hello, I'm",
             device=0,
         )

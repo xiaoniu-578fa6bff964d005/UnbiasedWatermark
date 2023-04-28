@@ -34,6 +34,9 @@ class WatermarkLogitsProcessor(LogitsProcessor):
         seed = int.from_bytes(truncated_hash, byteorder="big")
         return seed
 
+    def reset_history(self):
+        self.cc_history = set()
+
     def __call__(self, input_ids: LongTensor, scores: FloatTensor) -> FloatTensor:
         batch_size = input_ids.size(0)
         context_codes = [
