@@ -773,7 +773,6 @@ class LLM_Test(unittest.TestCase):
                 prompt,
                 max_length=17,
                 num_return_sequences=5,
-                do_sample=True,
                 **kwargs,
             )
             for c in results:
