@@ -139,8 +139,8 @@ class RobustLLR_Score(AbstractScore):
                     for i in range(_q_logits.shape[0])
                 ]
             )
-            max_llr = torch.tensor(max_llr, device=llr.device)
-            min_llr = torch.tensor(min_llr, device=llr.device)
+            max_llr = torch.tensor(max_llr, device=llr.device).type_as(llr)
+            min_llr = torch.tensor(min_llr, device=llr.device).type_as(llr)
             llr = torch.clamp(llr, min_llr[:, None], max_llr[:, None])
             return llr
         else:
