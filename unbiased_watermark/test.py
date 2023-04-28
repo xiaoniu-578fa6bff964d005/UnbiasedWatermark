@@ -757,7 +757,7 @@ class Gamma_Test(unittest.TestCase):
 
 
 class LLM_Test(unittest.TestCase):
-    def basic_test(
+    def generation_test(
         self,
         model="gpt2",
         seed=42,
@@ -765,7 +765,7 @@ class LLM_Test(unittest.TestCase):
         temperature=0.2,
         max_length=20,
         num_return_sequences=5,
-        **kwargs
+        **kwargs,
     ):
         from transformers import (
             pipeline,
@@ -788,7 +788,6 @@ class LLM_Test(unittest.TestCase):
             pad_token_id=tokenizer.eos_token_id,
             max_length=max_length,
             num_return_sequences=num_return_sequences,
-            device=0,
             **kwargs,
         )
 
@@ -831,15 +830,80 @@ class LLM_Test(unittest.TestCase):
         # if no gpu, return
         if not torch.cuda.is_available():
             return
-        self.basic_test(
-            model="facebook/opt-1.3b", prompt="list(range(10))=[0,1,2", max_length=40
+        self.generation_test(
+            model="facebook/opt-1.3b",
+            prompt="list(range(10))=[0,1,2",
+            max_length=40,
+            device=0,
         )
 
     def test_gpt2_1(self):
-        self.basic_test(model="gpt2", prompt="list(range(10))=[0,1,2")
+        self.generation_test(model="gpt2", prompt="list(range(10))=[0,1,2")
 
     def test_code_gpt2_1(self):
-        self.basic_test(
+        self.generation_test(
             model="shibing624/code-autocomplete-gpt2-base",
             prompt="list(range(10))=[0,1,2",
+        )
+
+    def score_test(
+        self, model="gpt2", text="list(range(10))=[0,1,2", temperature=0.2, **kwargs
+    ):
+        from transformers import (
+            pipeline,
+            set_seed,
+            LogitsProcessorList,
+            AutoTokenizer,
+            TemperatureLogitsWarper,
+        )
+        from . import (
+            WatermarkLogitsProcessor,
+            Delta_Reweight,
+            PrevN_ContextCodeExtractor,
+            get_score,
+        )
+
+        generator = pipeline(
+            "text-generation",
+            model=model,
+            **kwargs,
+        )
+        delta_wp = WatermarkLogitsProcessor(
+            b"private key",
+            Delta_Reweight(),
+            PrevN_ContextCodeExtractor(5),
+        )
+        gamma_wp = WatermarkLogitsProcessor(
+            b"private key",
+            Gamma_Reweight(0.1),
+            PrevN_ContextCodeExtractor(5),
+        )
+        llr_score = LLR_Score()
+        robust_llr_score = RobustLLR_Score(0.1, 0.1)
+        print("Text: ", text)
+        for wp_name, wp in [("delta", delta_wp), ("gamma", gamma_wp)]:
+            for score_name, score in [
+                ("llr", llr_score),
+                ("robust_llr", robust_llr_score),
+            ]:
+                scores = get_score(
+                    text,
+                    wp,
+                    score,
+                    generator.model,
+                    generator.tokenizer,
+                    temperature=temperature,
+                )
+                print(f"WP: {wp_name}, Score: {score_name}, Sum: {sum(scores[1:])}")
+
+    def test_gpt2_2(self):
+        text = "list(range(10))=[0,1,2,3]"
+        self.score_test(model="gpt2", text=text)
+
+    def test_opt_2(self):
+        text = "list(range(10))=[0,1,2,3]"
+        self.score_test(
+            model="gpt2",
+            text=text,
+            device=0,
         )

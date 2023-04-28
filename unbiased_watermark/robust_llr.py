@@ -64,25 +64,26 @@ def get_max_llr(
     ]  # log likelihood ratio with index
     llr.sort(key=lambda x: x[1], reverse=True)
     max_set = set()
+    sum_q_logits = -np.inf
+    sum_p_logits = -np.inf
 
     def lowest_llr():
-        sum_q_logits, sgn = logsumexp(
-            np.array([q_logits[j] for j in max_set] + [dist_q_logits]),
-            b=np.array([1 for j in max_set] + [-1]),
-            return_sign=True,
-        )
-        sum_p_logits = logsumexp(
-            np.array([p_logits[j] for j in max_set] + [dist_p_logits]),
-        )
-        if sgn != 1.0:
+        if sum_q_logits < dist_q_logits:
             return -np.inf
-        return sum_q_logits - sum_p_logits
+        modified_q_logits = sum_q_logits + np.log(
+            1 - np.exp(dist_q_logits - sum_q_logits)
+        )
+        modified_p_logits = np.logaddexp(sum_p_logits, dist_p_logits)
+        return modified_q_logits - modified_p_logits
 
     for i in range(len(p_logits)):
         if max_set:
             if llr[i][1] < lowest_llr():
                 break
         max_set.add(llr[i][0])
+        sum_q_logits = np.logaddexp(sum_q_logits, q_logits[llr[i][0]])
+        sum_p_logits = np.logaddexp(sum_p_logits, p_logits[llr[i][0]])
+
     return lowest_llr(), max_set
 
 
@@ -122,7 +123,9 @@ class RobustLLR_Score(AbstractScore):
         else:
             return (max_llr, min_llr)
 
-    def score(self, p_logits: FloatTensor, q_logits: FloatTensor) -> FloatTensor:
+    def score(
+        self, p_logits: FloatTensor, q_logits: FloatTensor, n_workers=None
+    ) -> FloatTensor:
         q_logits = F.log_softmax(q_logits, dim=-1)
         p_logits = F.log_softmax(p_logits, dim=-1)
         llr = q_logits - p_logits
@@ -132,16 +135,24 @@ class RobustLLR_Score(AbstractScore):
             max_llr, min_llr = self._score(_p_logits, _q_logits)
             llr = torch.clamp(llr, min_llr, max_llr)
             return llr
-        elif len(_q_logits.shape) == 2:
-            max_llr, min_llr = zip(
-                *[
-                    self._score(_p_logits[i], _q_logits[i])
-                    for i in range(_q_logits.shape[0])
-                ]
-            )
-            max_llr = torch.tensor(max_llr, device=llr.device).type_as(llr)
-            min_llr = torch.tensor(min_llr, device=llr.device).type_as(llr)
-            llr = torch.clamp(llr, min_llr[:, None], max_llr[:, None])
-            return llr
         else:
-            raise NotImplementedError
+            from concurrent.futures import ProcessPoolExecutor
+
+            ns, d = _q_logits.shape[:-1], _q_logits.shape[-1]
+            _q_logits_flat = _q_logits.reshape(-1, d)
+            _p_logits_flat = _p_logits.reshape(-1, d)
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                rs_flat = list(
+                    executor.map(self._score, _p_logits_flat, _q_logits_flat)
+                )
+            rs = np.reshape(rs_flat, (*ns, 2))
+            max_llr = rs[..., 0]
+            min_llr = rs[..., 1]
+            max_llr = (
+                torch.tensor(max_llr, device=llr.device).unsqueeze(-1).type_as(llr)
+            )
+            min_llr = (
+                torch.tensor(min_llr, device=llr.device).unsqueeze(-1).type_as(llr)
+            )
+            llr = torch.clamp(llr, min_llr, max_llr)
+            return llr
