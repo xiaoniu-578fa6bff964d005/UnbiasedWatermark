@@ -756,108 +756,47 @@ class Gamma_Test(unittest.TestCase):
         )
 
 
-class GPT2_Test(unittest.TestCase):
-    def test_1(self):
+class LLM_Test(unittest.TestCase):
+    def basic_test(self, model="gpt2", seed=42, prompt="list(range(10))=[0,1,2"):
         from transformers import pipeline, set_seed, LogitsProcessorList
-
-        generator = pipeline("text-generation", model="gpt2", do_sample=True)
-        prompt = "Count to 100: 1,2,3,4,5,6"
-
-        set_seed(42)
         from . import (
             WatermarkLogitsProcessor,
             Delta_Reweight,
             PrevN_ContextCodeExtractor,
         )
 
-        #  cs = generator(prompt, max_length=30, num_return_sequences=5, do_sample=True)
-        cs = generator(prompt, max_length=30, num_return_sequences=5)
-        for c in cs:
-            print(c["generated_text"])
+        generator = pipeline("text-generation", model=model, do_sample=True)
+
+        def run(**kwargs):
+            set_seed(42)
+            results = generator(
+                prompt,
+                max_length=17,
+                num_return_sequences=5,
+                do_sample=True,
+                **kwargs,
+            )
+            for c in results:
+                print(c["generated_text"])
+
+        run()
         print("=====")
         watermark_processor = WatermarkLogitsProcessor(
             b"private key",
             Delta_Reweight(),
             PrevN_ContextCodeExtractor(5),
         )
-        set_seed(42)
-        cs = generator(
-            prompt,
-            max_length=30,
-            num_return_sequences=5,
-            do_sample=True,
-            logits_processor=LogitsProcessorList([watermark_processor]),
-        )
-        for c in cs:
-            print(c["generated_text"])
+        run(logits_processor=LogitsProcessorList([watermark_processor]))
         print("=====")
         watermark_processor = WatermarkLogitsProcessor(
             b"private key",
             Gamma_Reweight(0.1),
             PrevN_ContextCodeExtractor(5),
         )
-        set_seed(42)
-        cs = generator(
-            prompt,
-            max_length=30,
-            num_return_sequences=5,
-            do_sample=True,
-            logits_processor=LogitsProcessorList([watermark_processor]),
-        )
-        for c in cs:
-            print(c["generated_text"])
+        run(logits_processor=LogitsProcessorList([watermark_processor]))
 
-
-class OPT_Test(unittest.TestCase):
-    def test_1_3b(self):
-        from transformers import pipeline, set_seed, LogitsProcessorList
-
-        generator = pipeline(
-            "text-generation", model="facebook/opt-1.3b", do_sample=True, device=0
-        )
-        prompt = "Count to 100: 1,2,3,4,5,6"
-
-        set_seed(42)
-        from . import (
-            WatermarkLogitsProcessor,
-            Delta_Reweight,
-            PrevN_ContextCodeExtractor,
-        )
-
-        results1 = generator(
-            prompt, max_length=30, num_return_sequences=5, do_sample=True
-        )
-        for c in results1:
-            print(c["generated_text"])
-        print("=====")
-        watermark_processor = WatermarkLogitsProcessor(
-            b"private key",
-            Delta_Reweight(),
-            PrevN_ContextCodeExtractor(5),
-        )
-        set_seed(42)
-        results2 = generator(
-            prompt,
-            max_length=30,
-            num_return_sequences=5,
-            do_sample=True,
-            logits_processor=LogitsProcessorList([watermark_processor]),
-        )
-        for c in results2:
-            print(c["generated_text"])
-        print("=====")
-        watermark_processor = WatermarkLogitsProcessor(
-            b"private key",
-            Gamma_Reweight(0.1),
-            PrevN_ContextCodeExtractor(5),
-        )
-        set_seed(42)
-        results3 = generator(
-            prompt,
-            max_length=30,
-            num_return_sequences=5,
-            do_sample=True,
-            logits_processor=LogitsProcessorList([watermark_processor]),
-        )
-        for c in results3:
-            print(c["generated_text"])
+    def test_opt_1(self):
+        # if no gpu, return
+        if not torch.cuda.is_available():
+            return
+        self.basic_test("facebook/opt-1.3b", 42, "list(range(10))=[0,1,2")
