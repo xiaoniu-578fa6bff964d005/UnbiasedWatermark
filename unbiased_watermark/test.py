@@ -757,45 +757,79 @@ class Gamma_Test(unittest.TestCase):
 
 
 class LLM_Test(unittest.TestCase):
-    def basic_test(self, model="gpt2", seed=42, prompt="list(range(10))=[0,1,2"):
-        from transformers import pipeline, set_seed, LogitsProcessorList
+    def basic_test(
+        self, model="gpt2", seed=42, prompt="list(range(10))=[0,1,2", temperature=0.2
+    ):
+        from transformers import (
+            pipeline,
+            set_seed,
+            LogitsProcessorList,
+            AutoTokenizer,
+            TemperatureLogitsWarper,
+        )
         from . import (
             WatermarkLogitsProcessor,
             Delta_Reweight,
             PrevN_ContextCodeExtractor,
         )
 
-        generator = pipeline("text-generation", model=model, do_sample=True)
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        generator = pipeline(
+            "text-generation",
+            model=model,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+        )
 
         def run(**kwargs):
             set_seed(42)
             results = generator(
                 prompt,
-                max_length=17,
+                #  max_length=17,
+                max_length=20,
                 num_return_sequences=5,
                 **kwargs,
             )
             for c in results:
                 print(c["generated_text"])
 
-        run()
+        run(
+            logits_processor=LogitsProcessorList([TemperatureLogitsWarper(temperature)])
+        )
         print("=====")
         watermark_processor = WatermarkLogitsProcessor(
             b"private key",
             Delta_Reweight(),
             PrevN_ContextCodeExtractor(5),
         )
-        run(logits_processor=LogitsProcessorList([watermark_processor]))
+        run(
+            logits_processor=LogitsProcessorList(
+                [TemperatureLogitsWarper(temperature), watermark_processor]
+            )
+        )
         print("=====")
         watermark_processor = WatermarkLogitsProcessor(
             b"private key",
             Gamma_Reweight(0.1),
             PrevN_ContextCodeExtractor(5),
         )
-        run(logits_processor=LogitsProcessorList([watermark_processor]))
+        run(
+            logits_processor=LogitsProcessorList(
+                [TemperatureLogitsWarper(temperature), watermark_processor]
+            )
+        )
 
     def test_opt_1(self):
         # if no gpu, return
         if not torch.cuda.is_available():
             return
-        self.basic_test("facebook/opt-1.3b", 42, "list(range(10))=[0,1,2")
+        self.basic_test(model="facebook/opt-1.3b", prompt="list(range(10))=[0,1,2")
+
+    def test_gpt2_1(self):
+        self.basic_test(model="gpt2", prompt="list(range(10))=[0,1,2")
+
+    def test_code_gpt2_1(self):
+        self.basic_test(
+            model="shibing624/code-autocomplete-gpt2-base",
+            prompt="list(range(10))=[0,1,2",
+        )
