@@ -758,7 +758,14 @@ class Gamma_Test(unittest.TestCase):
 
 class LLM_Test(unittest.TestCase):
     def basic_test(
-        self, model="gpt2", seed=42, prompt="list(range(10))=[0,1,2", temperature=0.2
+        self,
+        model="gpt2",
+        seed=42,
+        prompt="list(range(10))=[0,1,2",
+        temperature=0.2,
+        max_length=20,
+        num_return_sequences=5,
+        **kwargs
     ):
         from transformers import (
             pipeline,
@@ -779,15 +786,16 @@ class LLM_Test(unittest.TestCase):
             model=model,
             do_sample=True,
             pad_token_id=tokenizer.eos_token_id,
+            max_length=max_length,
+            num_return_sequences=num_return_sequences,
+            device=0,
+            **kwargs,
         )
 
         def run(**kwargs):
             set_seed(42)
             results = generator(
                 prompt,
-                #  max_length=17,
-                max_length=20,
-                num_return_sequences=5,
                 **kwargs,
             )
             for c in results:
@@ -823,7 +831,9 @@ class LLM_Test(unittest.TestCase):
         # if no gpu, return
         if not torch.cuda.is_available():
             return
-        self.basic_test(model="facebook/opt-1.3b", prompt="list(range(10))=[0,1,2")
+        self.basic_test(
+            model="facebook/opt-1.3b", prompt="list(range(10))=[0,1,2", max_length=40
+        )
 
     def test_gpt2_1(self):
         self.basic_test(model="gpt2", prompt="list(range(10))=[0,1,2")
