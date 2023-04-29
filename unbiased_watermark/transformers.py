@@ -72,7 +72,7 @@ def get_score(
     temperature=0.2,
     prompt: str = "",
     **kwargs
-) -> list[float]:
+) -> tuple[FloatTensor, int]:
     input_ids = tokenizer.encode(text)
     prompt_len = len(tokenizer.encode(prompt))
     input_ids = torch.tensor(input_ids).unsqueeze(0).to(model.device)
@@ -93,5 +93,10 @@ def get_score(
             continue
         new_logits[:, i] = watermark_processor(input_ids[:, :i], logits[:, i])
     all_scores = score.score(logits, new_logits)
+    if input_ids.ndim + 2 == all_scores.ndim:
+        # score is RobustLLR_Score_Batch
+        input_ids = input_ids.unsqueeze(-1).expand(
+            tuple(-1 for _ in range(input_ids.ndim)) + (all_scores.size(-2),)
+        )
     scores = torch.gather(all_scores, -1, input_ids.unsqueeze(-1)).squeeze(-1)
-    return scores[0].tolist(), prompt_len
+    return scores[0], prompt_len

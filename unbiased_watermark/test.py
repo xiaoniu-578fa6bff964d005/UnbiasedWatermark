@@ -1054,6 +1054,74 @@ class LLM_Test(unittest.TestCase):
                         sum_score = sum(scores[max(1, prompt_len) :])
                         print(f"{wp_name}\t{score_name}\t{sum_score}")
 
+    def search_robust_score(
+        self,
+        model="gpt2",
+        texts={},
+        temperature=0.2,
+        prompt="",
+        **kwargs,
+    ):
+        from transformers import (
+            pipeline,
+            LogitsProcessorList,
+            AutoTokenizer,
+            TemperatureLogitsWarper,
+        )
+        from . import (
+            WatermarkLogitsProcessor,
+            Delta_Reweight,
+            PrevN_ContextCodeExtractor,
+            get_score,
+        )
+        import math
+
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        generator = pipeline(
+            "text-generation",
+            model=model,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+            max_length=40,
+            num_return_sequences=1,
+            **kwargs,
+        )
+
+        delta_wp = WatermarkLogitsProcessor(
+            b"private key",
+            Delta_Reweight(),
+            PrevN_ContextCodeExtractor(5),
+        )
+        gamma_wp = WatermarkLogitsProcessor(
+            b"private key",
+            Gamma_Reweight(1),
+            PrevN_ContextCodeExtractor(5),
+        )
+        n = 10
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        for k in texts:
+            print(f"==={k}===")
+            for text in texts[k]:
+                print("Text: ", text)
+                print(f"re_wt\tdist_p\tdist_q\tscore")
+                for wp_name, wp in [("delta", delta_wp), ("gamma", gamma_wp)]:
+                    scores, prompt_len = get_score(
+                        text,
+                        wp,
+                        score,
+                        generator.model,
+                        generator.tokenizer,
+                        temperature=temperature,
+                        prompt=prompt,
+                    )
+                    i = torch.argmax(torch.sum(scores[prompt_len:], dim=0))
+                    query = score.batch_query.query_list[i]
+                    print(
+                        f"{wp_name}\t{math.exp(query.dist_p_log)}\t{math.exp(query.dist_q_log)}\t{sum(scores[prompt_len:,i])}"
+                    )
+
     def generation_test(
         self,
         model="gpt2",
@@ -1066,6 +1134,19 @@ class LLM_Test(unittest.TestCase):
         )
         print(repr(result))
         self.show_score(model=model, texts=result, **detect_config)
+
+    def generation_robust_test(
+        self,
+        model="gpt2",
+        generation_config={},
+        detect_config={},
+    ):
+        result = self.generation(
+            model=model,
+            **generation_config,
+        )
+        print(repr(result))
+        self.search_robust_score(model=model, texts=result, **detect_config)
 
     def test_gpt2_2(self):
         self.generation_test(
@@ -1139,6 +1220,59 @@ class LLM_Test(unittest.TestCase):
         if not torch.cuda.is_available():
             return
         self.generation_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 2,
+                "prompt": "To maximize parallelism",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+                "device": 0,
+            },
+        )
+
+    def test_gpt2_4(self):
+        self.generation_robust_test(
+            "gpt2",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+            },
+        )
+
+    def test_opt_4(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_robust_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+                "device": 0,
+            },
+        )
+
+    def test_opt_4_2(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_robust_test(
             "facebook/opt-1.3b",
             generation_config={
                 "temperature": 0.4,

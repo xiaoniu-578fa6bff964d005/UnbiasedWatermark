@@ -54,9 +54,8 @@ class GetMaxLLRQueryCache:
 def lowest_llr(query: GetMaxLLRQuery, query_cache: GetMaxLLRQueryCache) -> float:
     if query_cache.sum_q_logits <= query.dist_q_log:
         return -np.inf
-    modified_q_logits = query_cache.sum_q_logits + np.log(
-        1 - np.exp(query.dist_q_log - query_cache.sum_q_logits)
-    )
+    s = query.dist_q_log - query_cache.sum_q_logits
+    modified_q_logits = query_cache.sum_q_logits + np.log(-np.expm1(s))
     modified_p_logits = np.logaddexp(query_cache.sum_p_logits, query.dist_p_log)
     return modified_q_logits - modified_p_logits
 
