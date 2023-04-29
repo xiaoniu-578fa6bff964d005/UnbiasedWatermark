@@ -3,6 +3,7 @@
 
 from .base import *
 from .robust_llr import RobustLLR_Score
+from .robust_llr_batch import RobustLLR_Score_Batch
 from .delta import Delta_WatermarkCode, Delta_Reweight
 from .gamma import Gamma_WatermarkCode, Gamma_Reweight
 from .contextcode import *

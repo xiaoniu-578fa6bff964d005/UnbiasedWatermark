@@ -756,6 +756,143 @@ class Gamma_Test(unittest.TestCase):
         )
 
 
+class RobustLLR_Score_Batch_Test(unittest.TestCase):
+    def test_1(self):
+        from . import RobustLLR_Score_Batch
+
+        n = 2
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        self.assertTrue(
+            torch.allclose(
+                score.score(
+                    torch.tensor([0.0, 0.0, 0.0]), torch.tensor([0.0, 0.0, 0.0])
+                ),
+                torch.zeros(((n + 1) ** 2, 3)),
+            )
+        )
+
+    def test_2(self):
+        import math
+        import torch
+        from . import RobustLLR_Score_Batch, RobustLLR_Score
+
+        n = 2
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        scores = [
+            RobustLLR_Score(math.exp(query.dist_p_log), math.exp(query.dist_q_log))
+            for query in score.batch_query.query_list
+        ]
+        torch.manual_seed(0)
+        p_logits = torch.randn(5)
+        q_logits = torch.randn(5)
+        result1 = score.score(p_logits, q_logits)
+        for i, query in enumerate(score.batch_query.query_list):
+            result2 = scores[i].score(p_logits, q_logits)
+            self.assertTrue(
+                torch.allclose(
+                    result1[i],
+                    result2,
+                )
+            )
+
+    def test_3(self):
+        import math
+        import torch
+        from . import RobustLLR_Score_Batch, RobustLLR_Score
+
+        n = 3
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        scores = [
+            RobustLLR_Score(math.exp(query.dist_p_log), math.exp(query.dist_q_log))
+            for query in score.batch_query.query_list
+        ]
+        torch.manual_seed(0)
+        ts = 50000
+        p_logits = torch.randn(ts)
+        q_logits = torch.randn(ts)
+
+        import timeit
+
+        result1 = None
+
+        def run1():
+            nonlocal result1
+            result1 = score.score(p_logits, q_logits)
+
+        result2 = None
+
+        def run2():
+            nonlocal result2
+            result2 = [scores[i].score(p_logits, q_logits) for i in range(len(scores))]
+
+        t1 = timeit.timeit(run1, number=1)
+        t2 = timeit.timeit(run2, number=1)
+        print(f"batch time={t1}, serial time={t2}")
+        for i in range(len(scores)):
+            self.assertTrue(
+                torch.allclose(
+                    result1[i],
+                    result2[i],
+                )
+            )
+
+    def test_4(self):
+        import math
+        import torch
+        from . import RobustLLR_Score_Batch, RobustLLR_Score
+
+        n = 100
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        torch.manual_seed(0)
+        ts = 50000
+        p_logits = torch.randn(ts)
+        q_logits = torch.randn(ts)
+
+        import timeit
+
+        result1 = None
+
+        def run1():
+            nonlocal result1
+            result1 = score.score(p_logits, q_logits)
+
+        import random
+
+        random_query_subset = random.sample(
+            range(len(score.batch_query.query_list)), 100
+        )
+        result2 = None
+
+        def run2():
+            nonlocal result2
+            result2 = []
+            for i in random_query_subset:
+                query = score.batch_query.query_list[i]
+                sscore = RobustLLR_Score(
+                    math.exp(query.dist_p_log), math.exp(query.dist_q_log)
+                )
+                result2.append(sscore.score(p_logits, q_logits))
+
+        t1 = timeit.timeit(run1, number=1)
+        t2 = timeit.timeit(run2, number=1)
+        print(f"batch time={t1}, serial time (subset)={t2}")
+        for i, j in enumerate(random_query_subset):
+            self.assertTrue(
+                torch.allclose(
+                    result1[j],
+                    result2[i],
+                )
+            )
+
+
 class LLM_Test(unittest.TestCase):
     def generation(
         self,

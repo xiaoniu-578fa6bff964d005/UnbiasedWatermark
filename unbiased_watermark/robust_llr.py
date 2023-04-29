@@ -3,54 +3,11 @@
 
 
 import numpy as np
-import random
 import torch
 from torch import FloatTensor
 from torch.nn import functional as F
 
 from . import AbstractScore
-
-
-def logsumexp(a, axis=None, b=None, keepdims=False, return_sign=False):
-    """
-    from scipy
-    https://github.com/scipy/scipy/blob/c1ed5ece8ffbf05356a22a8106affcd11bd3aee0/scipy/special/_logsumexp.py#L7-L128
-    """
-    if b is not None:
-        a, b = np.broadcast_arrays(a, b)
-        if np.any(b == 0):
-            a = a + 0.0  # promote to at least float
-            a[b == 0] = -np.inf
-
-    a_max = np.amax(a, axis=axis, keepdims=True)
-
-    if a_max.ndim > 0:
-        a_max[~np.isfinite(a_max)] = 0
-    elif not np.isfinite(a_max):
-        a_max = 0
-
-    if b is not None:
-        b = np.asarray(b)
-        tmp = b * np.exp(a - a_max)
-    else:
-        tmp = np.exp(a - a_max)
-
-    # suppress warnings about log of zero
-    with np.errstate(divide="ignore"):
-        s = np.sum(tmp, axis=axis, keepdims=keepdims)
-        if return_sign:
-            sgn = np.sign(s)
-            s *= sgn  # /= makes more sense but we need zero -> zero
-        out = np.log(s)
-
-    if not keepdims:
-        a_max = np.squeeze(a_max, axis=axis)
-    out += a_max
-
-    if return_sign:
-        return out, sgn
-    else:
-        return out
 
 
 def get_max_llr(
@@ -146,13 +103,7 @@ class RobustLLR_Score(AbstractScore):
                     executor.map(self._score, _p_logits_flat, _q_logits_flat)
                 )
             rs = np.reshape(rs_flat, (*ns, 2))
-            max_llr = rs[..., 0]
-            min_llr = rs[..., 1]
-            max_llr = (
-                torch.tensor(max_llr, device=llr.device).unsqueeze(-1).type_as(llr)
-            )
-            min_llr = (
-                torch.tensor(min_llr, device=llr.device).unsqueeze(-1).type_as(llr)
-            )
-            llr = torch.clamp(llr, min_llr, max_llr)
+            max_llr = torch.tensor(rs[..., 0], device=llr.device, dtype=llr.dtype)
+            min_llr = torch.tensor(rs[..., 1], device=llr.device, dtype=llr.dtype)
+            llr = torch.clamp(llr, min_llr.unsqueeze(-1), max_llr.unsqueeze(-1))
             return llr
