@@ -757,7 +757,7 @@ class Gamma_Test(unittest.TestCase):
 
 
 class LLM_Test(unittest.TestCase):
-    def generation_test(
+    def generation(
         self,
         model="gpt2",
         seed=42,
@@ -809,18 +809,29 @@ class LLM_Test(unittest.TestCase):
             Gamma_Reweight(1),
             PrevN_ContextCodeExtractor(5),
         )
-        print(
-            f"""{{
-            "no": {repr(run(logits_processor=LogitsProcessorList([TemperatureLogitsWarper(temperature)])))},
-            "delta": {repr(run(logits_processor=LogitsProcessorList([TemperatureLogitsWarper(temperature), delta_wp])))},
-            "gamma": {repr(run(logits_processor=LogitsProcessorList([TemperatureLogitsWarper(temperature), gamma_wp])))},
-        }}"""
-        )
+        result = {
+            "no": run(
+                logits_processor=LogitsProcessorList(
+                    [TemperatureLogitsWarper(temperature)]
+                )
+            ),
+            "delta": run(
+                logits_processor=LogitsProcessorList(
+                    [TemperatureLogitsWarper(temperature), delta_wp]
+                )
+            ),
+            "gamma": run(
+                logits_processor=LogitsProcessorList(
+                    [TemperatureLogitsWarper(temperature), gamma_wp]
+                )
+            ),
+        }
+        return result
 
     def test_opt_1(self):
         if not torch.cuda.is_available():
             return
-        self.generation_test(
+        result = self.generation(
             model="facebook/opt-1.3b",
             prompt="Hello, I'm",
             max_length=40,
@@ -828,23 +839,26 @@ class LLM_Test(unittest.TestCase):
             num_return_sequences=1,
             temperature=0.4,
         )
+        print(repr(result))
 
     def test_gpt2_1(self):
-        self.generation_test(
+        result = self.generation(
             model="gpt2",
             prompt="Hello, I'm",
             max_length=40,
             num_return_sequences=1,
             temperature=0.4,
         )
+        print(repr(result))
 
     def test_code_gpt2_1(self):
-        self.generation_test(
+        result = self.generation(
             model="shibing624/code-autocomplete-gpt2-base",
             prompt="list(range(10))=[0,1,2",
         )
+        print(repr(result))
 
-    def score_test(self, model="gpt2", texts={}, temperature=0.2, prompt="", **kwargs):
+    def show_score(self, model="gpt2", texts={}, temperature=0.2, prompt="", **kwargs):
         from transformers import (
             pipeline,
             LogitsProcessorList,
@@ -858,9 +872,14 @@ class LLM_Test(unittest.TestCase):
             get_score,
         )
 
+        tokenizer = AutoTokenizer.from_pretrained(model)
         generator = pipeline(
             "text-generation",
             model=model,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+            max_length=40,
+            num_return_sequences=1,
             **kwargs,
         )
 
@@ -880,6 +899,7 @@ class LLM_Test(unittest.TestCase):
             print(f"==={k}===")
             for text in texts[k]:
                 print("Text: ", text)
+                print(f"re_wt\tdetect\tscore")
                 for wp_name, wp in [("delta", delta_wp), ("gamma", gamma_wp)]:
                     for score_name, score in [
                         ("llr", llr_score),
@@ -896,38 +916,103 @@ class LLM_Test(unittest.TestCase):
                         )
                         sum_score = sum(scores[max(1, prompt_len) :])
                         print(f"{wp_name}\t{score_name}\t{sum_score}")
-                        if k == "delta" and wp_name == "delta":
-                            print("scores: ", scores)
+
+    def generation_test(
+        self,
+        model="gpt2",
+        generation_config={},
+        detect_config={},
+    ):
+        result = self.generation(
+            model=model,
+            **generation_config,
+        )
+        print(repr(result))
+        self.show_score(model=model, texts=result, **detect_config)
 
     def test_gpt2_2(self):
-        texts = {
-            "no": [
-                "Hello, I'm not going to tell you how to do this, but I'm going to tell you how to make it.\n\nThe first step is to create an object that you can use"
-            ],
-            "delta": [
-                'Hello, I\'m not sure if you\'re familiar with the term "noun-based" or "noun-based" but I do know that it\'s a term that is used in the'
-            ],
-            "gamma": [
-                "Hello, I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm"
-            ],
-        }
-        self.score_test(model="gpt2", texts=texts)
+        self.generation_test(
+            "gpt2",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+            },
+            detect_config={
+                "temperature": 0.4,
+                "prompt": "Hello, I'm",
+            },
+        )
 
     def test_opt_2(self):
-        texts = {
-            "no": [
-                "Hello, I'm interested in the following:  * Moon HA Mudkip * Moon HA Totodile * Moon HA Larvitar * Moon HA Mudkip * Moon HA Timid HA"
-            ],
-            "delta": [
-                "Hello, I'm a new player, I'm currently in the process of making a character, I have a level 11 wizard, I'm trying to decide between a wizard and a cleric, I've"
-            ],
-            "gamma": [
-                "Hello, I'm interested in the following:  * HA Scatterbug * HA Treecko * HA Vulpix * HA Turtwig * HA Mudkip * HA Mudkip *"
-            ],
-        }
-        self.score_test(
-            model="facebook/opt-1.3b",
-            texts=texts,
-            prompt="Hello, I'm",
-            device=0,
+        if not torch.cuda.is_available():
+            return
+        self.generation_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.4,
+                "prompt": "Hello, I'm",
+                "device": 0,
+            },
+        )
+
+    def test_gpt2_3(self):
+        self.generation_test(
+            "gpt2",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+            },
+        )
+
+    def test_opt_3(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+                "device": 0,
+            },
+        )
+
+    def test_opt_3_2(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 2,
+                "prompt": "To maximize parallelism",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+                "device": 0,
+            },
         )
