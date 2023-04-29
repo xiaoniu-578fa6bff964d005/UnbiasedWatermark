@@ -70,15 +70,19 @@ def get_score(
     model,
     tokenizer,
     temperature=0.2,
+    prompt: str = "",
     **kwargs
 ) -> list[float]:
     input_ids = tokenizer.encode(text)
+    prompt_len = len(tokenizer.encode(prompt))
     input_ids = torch.tensor(input_ids).unsqueeze(0).to(model.device)
     outputs = model(input_ids)
     logits = outputs.logits[:, :-1, :] / temperature
     new_logits = torch.zeros_like(logits)
     for i in range(logits.size(1)):
+        if i == prompt_len:
+            watermark_processor.reset_history()
         new_logits[:, i] = watermark_processor(input_ids[:, : i + 1], logits[:, i])
     all_scores = score.score(logits, new_logits)
     scores = torch.gather(all_scores, -1, input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)
-    return [None] + scores[0].tolist()
+    return [None] + scores[0].tolist(), prompt_len

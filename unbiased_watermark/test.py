@@ -792,7 +792,7 @@ class LLM_Test(unittest.TestCase):
         )
 
         def run(**kwargs):
-            set_seed(42)
+            set_seed(seed)
             results = generator(
                 prompt,
                 **kwargs,
@@ -825,11 +825,18 @@ class LLM_Test(unittest.TestCase):
             prompt="Hello, I'm",
             max_length=40,
             device=0,
+            num_return_sequences=1,
             temperature=0.4,
         )
 
     def test_gpt2_1(self):
-        self.generation_test(model="gpt2", prompt="list(range(10))=[0,1,2")
+        self.generation_test(
+            model="gpt2",
+            prompt="Hello, I'm",
+            max_length=40,
+            num_return_sequences=1,
+            temperature=0.4,
+        )
 
     def test_code_gpt2_1(self):
         self.generation_test(
@@ -840,7 +847,6 @@ class LLM_Test(unittest.TestCase):
     def score_test(self, model="gpt2", texts={}, temperature=0.2, prompt="", **kwargs):
         from transformers import (
             pipeline,
-            set_seed,
             LogitsProcessorList,
             AutoTokenizer,
             TemperatureLogitsWarper,
@@ -857,7 +863,6 @@ class LLM_Test(unittest.TestCase):
             model=model,
             **kwargs,
         )
-        prompt_len = len(generator.tokenizer.encode(prompt))
 
         delta_wp = WatermarkLogitsProcessor(
             b"private key",
@@ -866,7 +871,7 @@ class LLM_Test(unittest.TestCase):
         )
         gamma_wp = WatermarkLogitsProcessor(
             b"private key",
-            Gamma_Reweight(0.1),
+            Gamma_Reweight(1),
             PrevN_ContextCodeExtractor(5),
         )
         llr_score = LLR_Score()
@@ -880,46 +885,44 @@ class LLM_Test(unittest.TestCase):
                         ("llr", llr_score),
                         ("r_llr", robust_llr_score),
                     ]:
-                        scores = get_score(
+                        scores, prompt_len = get_score(
                             text,
                             wp,
                             score,
                             generator.model,
                             generator.tokenizer,
                             temperature=temperature,
+                            prompt=prompt,
                         )
-                        wp.reset_history()
                         sum_score = sum(scores[max(1, prompt_len) :])
                         print(f"{wp_name}\t{score_name}\t{sum_score}")
-                        #  if k == "delta" and wp_name == "delta":
-                        #      print("scores: ", scores)
+                        if k == "delta" and wp_name == "delta":
+                            print("scores: ", scores)
 
     def test_gpt2_2(self):
-        texts = {"no": ["list(range(10))=[0,1,2,3]"]}
+        texts = {
+            "no": [
+                "Hello, I'm not going to tell you how to do this, but I'm going to tell you how to make it.\n\nThe first step is to create an object that you can use"
+            ],
+            "delta": [
+                'Hello, I\'m not sure if you\'re familiar with the term "noun-based" or "noun-based" but I do know that it\'s a term that is used in the'
+            ],
+            "gamma": [
+                "Hello, I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm sorry. I'm"
+            ],
+        }
         self.score_test(model="gpt2", texts=texts)
 
     def test_opt_2(self):
         texts = {
             "no": [
-                "Hello, I'm interested in the following:  * Moon HA Mudkip * Moon HA Totodile * Moon HA Larvitar * Moon HA Mudkip * Moon HA Timid HA",
-                "Hello, I'm interested in the following:  - Lure Ball HA Chimchar (Bold, 4EMs) - Lure Ball HA Gible (Bold, 4EMs)",
-                "Hello, I'm a new player and I've been playing for about a week. I've been playing on the same server for a while but I'm just starting to get into it. I'm",
-                "Hello, I'm new to this sub. I think I'm going to post a lot of my work here. I'm a graphic designer and I'm looking for a job. I'm not sure",
-                "Hello, I'm interested in the following:  * Moon Ball HA Dratini * Moon Ball HA Dratini * Moon Ball HA Tepig * Moon Ball HA Lileep * Moon",
+                "Hello, I'm interested in the following:  * Moon HA Mudkip * Moon HA Totodile * Moon HA Larvitar * Moon HA Mudkip * Moon HA Timid HA"
             ],
             "delta": [
-                "Hello, I'm a new player, I'm currently in the process of making a character, I have a level 11 wizard, I'm trying to decide between a wizard and a cleric, I've",
-                "Hello, I'm interested in your HA Torchic and Friend Ball Scyther. I have a DBHA Dratini, DBHA Porygon, DBHA Omanyte, DBHA O",
-                "Hello, I'm a new player and I have a question. I am currently farming the last stage of the event, and I have a question. I'm trying to get the golden ticket, but",
-                "Hello, I'm new here. I'm a bit confused. I've been on this sub for a while now, but I don't understand what's going on.\nThis is a sub for",
-                "Hello, I'm interested in the Dior lipsticks. How much are you asking for them?\nHi! I'm not sure what the current price is on them, but I'd be happy",
+                "Hello, I'm a new player, I'm currently in the process of making a character, I have a level 11 wizard, I'm trying to decide between a wizard and a cleric, I've"
             ],
             "gamma": [
-                "Hello, I'm interested in the following:  * HA Scatterbug * HA Treecko * HA Vulpix * HA Turtwig * HA Mudkip * HA Mudkip *",
-                "Hello, I'm interested in the following:  -  * DBHA Lileep  - DBHA Snivy  - DBHA Tangela  - DBHA Vulpix ",
-                "Hello, I'm a new player to the game and I'm looking to join a guild. I have a level 28 priest, and I'm looking to join a guild that is active and has a",
-                "Hello, I'm new to the game and I think I'm going to buy the game for the first time. I'm looking for a guild to join. I'm a healer and I'm looking",
-                "Hello, I'm interested in the following:  * Moon Ball HA Vulpix * Moon Ball HA Dratini * Moon Ball HA Corphish * Moon Ball HA Lileep * Moon",
+                "Hello, I'm interested in the following:  * HA Scatterbug * HA Treecko * HA Vulpix * HA Turtwig * HA Mudkip * HA Mudkip *"
             ],
         }
         self.score_test(
