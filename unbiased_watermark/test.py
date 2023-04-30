@@ -1060,6 +1060,8 @@ class LLM_Test(unittest.TestCase):
         texts={},
         temperature=0.2,
         prompt="",
+        dist_p=None,
+        dist_q=None,
         **kwargs,
     ):
         from transformers import (
@@ -1097,10 +1099,14 @@ class LLM_Test(unittest.TestCase):
             Gamma_Reweight(1),
             PrevN_ContextCodeExtractor(5),
         )
-        n = 10
-        dist_p = [float(i) / n for i in range(n + 1)]
-        dist_q = [float(i) / n for i in range(n + 1)]
+        if dist_p is None:
+            n = 10
+            dist_p = [float(i) / n for i in range(n + 1)]
+        if dist_q is None:
+            n = 10
+            dist_q = [float(i) / n for i in range(n + 1)]
         score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        n_scores = len(score.batch_query.query_list)
         for k in texts:
             print(f"==={k}===")
             for text in texts[k]:
@@ -1118,8 +1124,9 @@ class LLM_Test(unittest.TestCase):
                     )
                     i = torch.argmax(torch.sum(scores[prompt_len:], dim=0))
                     query = score.batch_query.query_list[i]
+                    final_score = sum(scores[prompt_len:, i]) - math.log(n_scores)
                     print(
-                        f"{wp_name}\t{math.exp(query.dist_p_log)}\t{math.exp(query.dist_q_log)}\t{sum(scores[prompt_len:,i])}"
+                        f"{wp_name}\t{math.exp(query.dist_p_log)}\t{math.exp(query.dist_q_log)}\t{final_score}"
                     )
 
     def generation_test(
@@ -1285,5 +1292,7 @@ class LLM_Test(unittest.TestCase):
                 "temperature": 0.3,
                 "prompt": "",
                 "device": 0,
+                "dist_p": [0],
+                "dist_q": [i / 10 for i in range(11)],
             },
         )
