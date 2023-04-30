@@ -12,7 +12,6 @@ cnn_daily = load_dataset("cnn_dailymail", "3.0.0").shuffle(seed=42)
 model = AutoModelForSeq2SeqLM.from_pretrained("philschmid/bart-large-cnn-samsum").cuda()
 tokenizer = AutoTokenizer.from_pretrained("philschmid/bart-large-cnn-samsum")
 
-
 # Process the test dataset in batches to generate summaries
 def preprocess_data(example):
     source = example["article"]
@@ -44,7 +43,8 @@ for i in range(num_batches):
     batch_summaries = model.generate(torch.Tensor(batch['inputs']).to(device=model.device).long(),
                              max_length=128)
     decodes = tokenizer.batch_decode(batch_summaries, skip_special_tokens=True)
-    result = rouge.compute(predictions=batch['highlights'], references=decodes, use_stemmer=True)
+    # The result is for debugging use
+    # result = rouge.compute(predictions=batch['highlights'], references=decodes, use_stemmer=True)
     # import pdb; pdb.set_trace()
     generated_summaries.extend(decodes)
 
