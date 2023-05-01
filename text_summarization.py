@@ -32,14 +32,17 @@ tokenized_cnn_daily = cnn_daily['test'].map(preprocess_data, batched=True)
 rouge = load_metric("rouge")
 
 
-batch_size = 8
-num_batches = len(tokenized_cnn_daily) // batch_size
+batch_size = 64
+num_batches = len(tokenized_cnn_daily) // batch_size + 1
 generated_summaries = []
 
 for i in range(num_batches):
     batch_start = i * batch_size
     batch_end = (i + 1) * batch_size
-    batch = tokenized_cnn_daily[batch_start:batch_end]
+    if batch_end < len(tokenized_cnn_daily):
+        batch = tokenized_cnn_daily[batch_start:batch_end]
+    else:
+        batch = tokenized_cnn_daily[batch_start:]
     batch_summaries = model.generate(torch.Tensor(batch['inputs']).to(device=model.device).long(),
                              max_length=128)
     decodes = tokenizer.batch_decode(batch_summaries, skip_special_tokens=True)
