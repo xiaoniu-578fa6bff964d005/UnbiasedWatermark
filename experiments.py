@@ -66,6 +66,17 @@ def text_summarization_exp_worker(tq, rq, batch_size=8):
         PrevN_ContextCodeExtractor(5),
     )
 
+    from lm_watermarking.watermark_processor import (
+        WatermarkLogitsProcessor as WatermarkLogitsProcessor_John,
+    )
+
+    john_wp = WatermarkLogitsProcessor_John(
+        vocab=list(range(10)),  # placeholder
+        gamma=0.25,
+        delta=2.0,
+        seeding_scheme="simple_1",
+    )
+
     def group_batch(batch):
         return {k: [v] for k, v in batch.items()}
 
@@ -79,6 +90,7 @@ def text_summarization_exp_worker(tq, rq, batch_size=8):
         tq.put({"batch": batch, "watermark_processor": None})
         tq.put({"batch": batch, "watermark_processor": delta_wp})
         tq.put({"batch": batch, "watermark_processor": gamma_wp})
+        tq.put({"batch": batch, "watermark_processor": john_wp})
 
 
 def text_summarization_store_worker(rq, rqe):
@@ -144,7 +156,10 @@ def text_summarization_gpu_worker(
         wp = task["watermark_processor"]
         lps = []
         if wp is not None:
-            wp.reset_history()
+            if "reset_history" in dir(wp):
+                wp.reset_history()
+            if "vocab_size" in dir(wp):
+                wp.vocab_size = model.config.vocab_size
             lps.append(wp)
 
         set_seed(42)
@@ -210,7 +225,6 @@ def text_summarization_evaluate():
     ]
     out_ds = out_ds.sort("id")
     wp_types = set(out_ds["watermark_processor"])
-    print(wp_types)
 
     import evaluate
 
@@ -233,5 +247,5 @@ def text_summarization_evaluate():
 
 
 if __name__ == "__main__":
-    #  text_summarization_map()
+    text_summarization_map()
     text_summarization_evaluate()
