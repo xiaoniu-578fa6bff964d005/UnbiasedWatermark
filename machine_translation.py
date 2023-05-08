@@ -76,6 +76,7 @@ for i in tqdm(range(num_batches)):
         batch = tokenized_wmt[batch_start:batch_end]
     else:
         batch = tokenized_wmt[batch_start:]
+    
     batch_translation = model.generate(
         torch.Tensor(batch["inputs"]).to(device=model.device).long(),
         max_length=512,
