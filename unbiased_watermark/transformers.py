@@ -5,7 +5,7 @@ import torch
 from torch import FloatTensor, LongTensor
 from transformers import LogitsProcessor
 
-from .base import AbstractReweight, AbstractContextCodeExtractor
+from .base import AbstractReweight, AbstractContextCodeExtractor, AbstractScore
 
 
 class WatermarkLogitsProcessor(LogitsProcessor):
@@ -14,13 +14,16 @@ class WatermarkLogitsProcessor(LogitsProcessor):
         private_key: any,
         reweight: AbstractReweight,
         context_code_extractor: AbstractContextCodeExtractor,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.private_key = private_key
         self.reweight = reweight
         self.context_code_extractor = context_code_extractor
         self.cc_history = set()
+
+    def __repr__(self):
+        return f"WatermarkLogitsProcessor({repr(self.private_key)}, {repr(self.reweight)}, {repr(self.context_code_extractor)})"
 
     def get_rng_seed(self, context_code: any) -> any:
         self.cc_history.add(context_code)
@@ -33,6 +36,9 @@ class WatermarkLogitsProcessor(LogitsProcessor):
         truncated_hash = full_hash[:8]
         seed = int.from_bytes(truncated_hash, byteorder="big")
         return seed
+
+    def reset_history(self):
+        self.cc_history = set()
 
     def __call__(self, input_ids: LongTensor, scores: FloatTensor) -> FloatTensor:
         batch_size = input_ids.size(0)
@@ -58,3 +64,42 @@ class WatermarkLogitsProcessor(LogitsProcessor):
         )
         reweighted_scores = self.reweight.reweight_logits(watermark_code, scores)
         return torch.where(mask[:, None], scores, reweighted_scores)
+
+
+def get_score(
+    text: str,
+    watermark_processor: WatermarkLogitsProcessor,
+    score: AbstractScore,
+    model,
+    tokenizer,
+    temperature=0.2,
+    prompt: str = "",
+    **kwargs,
+) -> tuple[FloatTensor, int]:
+    input_ids = tokenizer.encode(text)
+    prompt_len = len(tokenizer.encode(prompt))
+    input_ids = torch.tensor(input_ids).unsqueeze(0).to(model.device)
+    outputs = model(input_ids)
+    logits = (
+        torch.cat(
+            [torch.zeros_like(outputs.logits[:, :1]), outputs.logits[:, :-1]],
+            dim=1,
+        )
+        / temperature
+    )
+    new_logits = torch.clone(logits)
+    for i in range(logits.size(1)):
+        if i == prompt_len:
+            watermark_processor.reset_history()
+        if i == 0:
+            watermark_processor.reset_history()
+            continue
+        new_logits[:, i] = watermark_processor(input_ids[:, :i], logits[:, i])
+    all_scores = score.score(logits, new_logits)
+    if input_ids.ndim + 2 == all_scores.ndim:
+        # score is RobustLLR_Score_Batch
+        input_ids = input_ids.unsqueeze(-1).expand(
+            tuple(-1 for _ in range(input_ids.ndim)) + (all_scores.size(-2),)
+        )
+    scores = torch.gather(all_scores, -1, input_ids.unsqueeze(-1)).squeeze(-1)
+    return scores[0], prompt_len

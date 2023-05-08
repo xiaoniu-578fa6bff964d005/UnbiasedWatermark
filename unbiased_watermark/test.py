@@ -756,46 +756,543 @@ class Gamma_Test(unittest.TestCase):
         )
 
 
+class RobustLLR_Score_Batch_Test(unittest.TestCase):
+    def test_1(self):
+        from . import RobustLLR_Score_Batch
+
+        n = 2
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        self.assertTrue(
+            torch.allclose(
+                score.score(
+                    torch.tensor([0.0, 0.0, 0.0]), torch.tensor([0.0, 0.0, 0.0])
+                ),
+                torch.zeros(((n + 1) ** 2, 3)),
+            )
+        )
+
+    def test_2(self):
+        import math
+        import torch
+        from . import RobustLLR_Score_Batch, RobustLLR_Score
+
+        n = 2
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        scores = [
+            RobustLLR_Score(math.exp(query.dist_p_log), math.exp(query.dist_q_log))
+            for query in score.batch_query.query_list
+        ]
+        torch.manual_seed(0)
+        p_logits = torch.randn(5)
+        q_logits = torch.randn(5)
+        result1 = score.score(p_logits, q_logits)
+        for i, query in enumerate(score.batch_query.query_list):
+            result2 = scores[i].score(p_logits, q_logits)
+            self.assertTrue(
+                torch.allclose(
+                    result1[i],
+                    result2,
+                )
+            )
+
+    def test_3(self):
+        import math
+        import torch
+        from . import RobustLLR_Score_Batch, RobustLLR_Score
+
+        n = 3
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        scores = [
+            RobustLLR_Score(math.exp(query.dist_p_log), math.exp(query.dist_q_log))
+            for query in score.batch_query.query_list
+        ]
+        torch.manual_seed(0)
+        ts = 50000
+        p_logits = torch.randn(ts)
+        q_logits = torch.randn(ts)
+
+        import timeit
+
+        result1 = None
+
+        def run1():
+            nonlocal result1
+            result1 = score.score(p_logits, q_logits)
+
+        result2 = None
+
+        def run2():
+            nonlocal result2
+            result2 = [scores[i].score(p_logits, q_logits) for i in range(len(scores))]
+
+        t1 = timeit.timeit(run1, number=1)
+        t2 = timeit.timeit(run2, number=1)
+        print(f"batch time={t1}, serial time={t2}")
+        for i in range(len(scores)):
+            self.assertTrue(
+                torch.allclose(
+                    result1[i],
+                    result2[i],
+                )
+            )
+
+    def test_4(self):
+        import math
+        import torch
+        from . import RobustLLR_Score_Batch, RobustLLR_Score
+
+        n = 100
+        dist_p = [float(i) / n for i in range(n + 1)]
+        dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        torch.manual_seed(0)
+        ts = 50000
+        p_logits = torch.randn(ts)
+        q_logits = torch.randn(ts)
+
+        import timeit
+
+        result1 = None
+
+        def run1():
+            nonlocal result1
+            result1 = score.score(p_logits, q_logits)
+
+        import random
+
+        random_query_subset = random.sample(
+            range(len(score.batch_query.query_list)), 100
+        )
+        result2 = None
+
+        def run2():
+            nonlocal result2
+            result2 = []
+            for i in random_query_subset:
+                query = score.batch_query.query_list[i]
+                sscore = RobustLLR_Score(
+                    math.exp(query.dist_p_log), math.exp(query.dist_q_log)
+                )
+                result2.append(sscore.score(p_logits, q_logits))
+
+        t1 = timeit.timeit(run1, number=1)
+        t2 = timeit.timeit(run2, number=1)
+        print(f"batch time={t1}, serial time (subset)={t2}")
+        for i, j in enumerate(random_query_subset):
+            self.assertTrue(
+                torch.allclose(
+                    result1[j],
+                    result2[i],
+                )
+            )
+
+
 class LLM_Test(unittest.TestCase):
-    def basic_test(self, model="gpt2", seed=42, prompt="list(range(10))=[0,1,2"):
-        from transformers import pipeline, set_seed, LogitsProcessorList
+    def generation(
+        self,
+        model="gpt2",
+        seed=42,
+        prompt="list(range(10))=[0,1,2",
+        temperature=0.2,
+        max_length=20,
+        num_return_sequences=5,
+        **kwargs,
+    ):
+        from transformers import (
+            pipeline,
+            set_seed,
+            LogitsProcessorList,
+            AutoTokenizer,
+            TemperatureLogitsWarper,
+        )
         from . import (
             WatermarkLogitsProcessor,
             Delta_Reweight,
             PrevN_ContextCodeExtractor,
         )
 
-        generator = pipeline("text-generation", model=model, do_sample=True)
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        generator = pipeline(
+            "text-generation",
+            model=model,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+            max_length=max_length,
+            num_return_sequences=num_return_sequences,
+            **kwargs,
+        )
 
         def run(**kwargs):
-            set_seed(42)
+            set_seed(seed)
             results = generator(
                 prompt,
-                max_length=17,
-                num_return_sequences=5,
                 **kwargs,
             )
-            for c in results:
-                print(c["generated_text"])
+            return [r["generated_text"] for r in results]
 
-        run()
-        print("=====")
-        watermark_processor = WatermarkLogitsProcessor(
+        delta_wp = WatermarkLogitsProcessor(
             b"private key",
             Delta_Reweight(),
             PrevN_ContextCodeExtractor(5),
         )
-        run(logits_processor=LogitsProcessorList([watermark_processor]))
-        print("=====")
-        watermark_processor = WatermarkLogitsProcessor(
+        gamma_wp = WatermarkLogitsProcessor(
             b"private key",
-            Gamma_Reweight(0.1),
+            Gamma_Reweight(1),
             PrevN_ContextCodeExtractor(5),
         )
-        run(logits_processor=LogitsProcessorList([watermark_processor]))
+        result = {
+            "no": run(
+                logits_processor=LogitsProcessorList(
+                    [TemperatureLogitsWarper(temperature)]
+                )
+            ),
+            "delta": run(
+                logits_processor=LogitsProcessorList(
+                    [TemperatureLogitsWarper(temperature), delta_wp]
+                )
+            ),
+            "gamma": run(
+                logits_processor=LogitsProcessorList(
+                    [TemperatureLogitsWarper(temperature), gamma_wp]
+                )
+            ),
+        }
+        return result
 
     def test_opt_1(self):
-        # if no gpu, return
         if not torch.cuda.is_available():
             return
-        self.basic_test("facebook/opt-1.3b", 42, "list(range(10))=[0,1,2")
+        result = self.generation(
+            model="facebook/opt-1.3b",
+            prompt="Hello, I'm",
+            max_length=40,
+            device=0,
+            num_return_sequences=1,
+            temperature=0.4,
+        )
+        print(repr(result))
+
+    def test_gpt2_1(self):
+        result = self.generation(
+            model="gpt2",
+            prompt="Hello, I'm",
+            max_length=40,
+            num_return_sequences=1,
+            temperature=0.4,
+        )
+        print(repr(result))
+
+    def test_code_gpt2_1(self):
+        result = self.generation(
+            model="shibing624/code-autocomplete-gpt2-base",
+            prompt="list(range(10))=[0,1,2",
+        )
+        print(repr(result))
+
+    def show_score(self, model="gpt2", texts={}, temperature=0.2, prompt="", **kwargs):
+        from transformers import (
+            pipeline,
+            LogitsProcessorList,
+            AutoTokenizer,
+            TemperatureLogitsWarper,
+        )
+        from . import (
+            WatermarkLogitsProcessor,
+            Delta_Reweight,
+            PrevN_ContextCodeExtractor,
+            get_score,
+        )
+
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        generator = pipeline(
+            "text-generation",
+            model=model,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+            max_length=40,
+            num_return_sequences=1,
+            **kwargs,
+        )
+
+        delta_wp = WatermarkLogitsProcessor(
+            b"private key",
+            Delta_Reweight(),
+            PrevN_ContextCodeExtractor(5),
+        )
+        gamma_wp = WatermarkLogitsProcessor(
+            b"private key",
+            Gamma_Reweight(1),
+            PrevN_ContextCodeExtractor(5),
+        )
+        llr_score = LLR_Score()
+        robust_llr_score = RobustLLR_Score(0.1, 0.1)
+        for k in texts:
+            print(f"==={k}===")
+            for text in texts[k]:
+                print("Text: ", text)
+                print(f"re_wt\tdetect\tscore")
+                for wp_name, wp in [("delta", delta_wp), ("gamma", gamma_wp)]:
+                    for score_name, score in [
+                        ("llr", llr_score),
+                        ("r_llr", robust_llr_score),
+                    ]:
+                        scores, prompt_len = get_score(
+                            text,
+                            wp,
+                            score,
+                            generator.model,
+                            generator.tokenizer,
+                            temperature=temperature,
+                            prompt=prompt,
+                        )
+                        sum_score = sum(scores[max(1, prompt_len) :])
+                        print(f"{wp_name}\t{score_name}\t{sum_score}")
+
+    def search_robust_score(
+        self,
+        model="gpt2",
+        texts={},
+        temperature=0.2,
+        prompt="",
+        dist_p=None,
+        dist_q=None,
+        **kwargs,
+    ):
+        from transformers import (
+            pipeline,
+            LogitsProcessorList,
+            AutoTokenizer,
+            TemperatureLogitsWarper,
+        )
+        from . import (
+            WatermarkLogitsProcessor,
+            Delta_Reweight,
+            PrevN_ContextCodeExtractor,
+            get_score,
+        )
+        import math
+
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        generator = pipeline(
+            "text-generation",
+            model=model,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+            max_length=40,
+            num_return_sequences=1,
+            **kwargs,
+        )
+
+        delta_wp = WatermarkLogitsProcessor(
+            b"private key",
+            Delta_Reweight(),
+            PrevN_ContextCodeExtractor(5),
+        )
+        gamma_wp = WatermarkLogitsProcessor(
+            b"private key",
+            Gamma_Reweight(1),
+            PrevN_ContextCodeExtractor(5),
+        )
+        if dist_p is None:
+            n = 10
+            dist_p = [float(i) / n for i in range(n + 1)]
+        if dist_q is None:
+            n = 10
+            dist_q = [float(i) / n for i in range(n + 1)]
+        score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
+        n_scores = len(score.batch_query.query_list)
+        for k in texts:
+            print(f"==={k}===")
+            for text in texts[k]:
+                print("Text: ", text)
+                print(f"re_wt\tdist_p\tdist_q\tscore")
+                for wp_name, wp in [("delta", delta_wp), ("gamma", gamma_wp)]:
+                    scores, prompt_len = get_score(
+                        text,
+                        wp,
+                        score,
+                        generator.model,
+                        generator.tokenizer,
+                        temperature=temperature,
+                        prompt=prompt,
+                    )
+                    i = torch.argmax(torch.sum(scores[prompt_len:], dim=0))
+                    query = score.batch_query.query_list[i]
+                    final_score = sum(scores[prompt_len:, i]) - math.log(n_scores)
+                    print(
+                        f"{wp_name}\t{math.exp(query.dist_p_log)}\t{math.exp(query.dist_q_log)}\t{final_score}"
+                    )
+
+    def generation_test(
+        self,
+        model="gpt2",
+        generation_config={},
+        detect_config={},
+    ):
+        result = self.generation(
+            model=model,
+            **generation_config,
+        )
+        print(repr(result))
+        self.show_score(model=model, texts=result, **detect_config)
+
+    def generation_robust_test(
+        self,
+        model="gpt2",
+        generation_config={},
+        detect_config={},
+    ):
+        result = self.generation(
+            model=model,
+            **generation_config,
+        )
+        print(repr(result))
+        self.search_robust_score(model=model, texts=result, **detect_config)
+
+    def test_gpt2_2(self):
+        self.generation_test(
+            "gpt2",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+            },
+            detect_config={
+                "temperature": 0.4,
+                "prompt": "Hello, I'm",
+            },
+        )
+
+    def test_opt_2(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.4,
+                "prompt": "Hello, I'm",
+                "device": 0,
+            },
+        )
+
+    def test_gpt2_3(self):
+        self.generation_test(
+            "gpt2",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+            },
+        )
+
+    def test_opt_3(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+                "device": 0,
+            },
+        )
+
+    def test_opt_3_2(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 2,
+                "prompt": "To maximize parallelism",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+                "device": 0,
+            },
+        )
+
+    def test_gpt2_4(self):
+        self.generation_robust_test(
+            "gpt2",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+            },
+        )
+
+    def test_opt_4(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_robust_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 1,
+                "prompt": "Hello, I'm",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+                "device": 0,
+            },
+        )
+
+    def test_opt_4_2(self):
+        if not torch.cuda.is_available():
+            return
+        self.generation_robust_test(
+            "facebook/opt-1.3b",
+            generation_config={
+                "temperature": 0.4,
+                "max_length": 100,
+                "num_return_sequences": 2,
+                "prompt": "To maximize parallelism",
+                "device": 0,
+            },
+            detect_config={
+                "temperature": 0.3,
+                "prompt": "",
+                "device": 0,
+                "dist_p": [0],
+                "dist_q": [i / 10 for i in range(11)],
+            },
+        )

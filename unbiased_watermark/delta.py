@@ -35,13 +35,16 @@ class Delta_WatermarkCode(AbstractWatermarkCode):
 class Delta_Reweight(AbstractReweight):
     watermark_code_type = Delta_WatermarkCode
 
+    def __repr__(self):
+        return f"Delta_Reweight()"
+
     def reweight_logits(
         self, code: AbstractWatermarkCode, p_logits: FloatTensor
     ) -> FloatTensor:
         cumsum = torch.cumsum(F.softmax(p_logits, dim=-1), dim=-1)
         index = torch.searchsorted(cumsum, code.u[..., None], right=True)
         index = torch.clamp(index, 0, p_logits.shape[-1] - 1)
-        modified_logits = p_logits - 1e3 * (
+        modified_logits = p_logits - 1e5 * (
             torch.arange(p_logits.shape[-1], device=p_logits.device) != index
         )
         return modified_logits
