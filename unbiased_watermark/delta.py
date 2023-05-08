@@ -35,6 +35,9 @@ class Delta_WatermarkCode(AbstractWatermarkCode):
 class Delta_Reweight(AbstractReweight):
     watermark_code_type = Delta_WatermarkCode
 
+    def __repr__(self):
+        return f"Delta_Reweight()"
+
     def reweight_logits(
         self, code: AbstractWatermarkCode, p_logits: FloatTensor
     ) -> FloatTensor:

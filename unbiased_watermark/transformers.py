@@ -14,13 +14,16 @@ class WatermarkLogitsProcessor(LogitsProcessor):
         private_key: any,
         reweight: AbstractReweight,
         context_code_extractor: AbstractContextCodeExtractor,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.private_key = private_key
         self.reweight = reweight
         self.context_code_extractor = context_code_extractor
         self.cc_history = set()
+
+    def __repr__(self):
+        return f"WatermarkLogitsProcessor({repr(self.private_key)}, {repr(self.reweight)}, {repr(self.context_code_extractor)})"
 
     def get_rng_seed(self, context_code: any) -> any:
         self.cc_history.add(context_code)
@@ -71,7 +74,7 @@ def get_score(
     tokenizer,
     temperature=0.2,
     prompt: str = "",
-    **kwargs
+    **kwargs,
 ) -> tuple[FloatTensor, int]:
     input_ids = tokenizer.encode(text)
     prompt_len = len(tokenizer.encode(prompt))
