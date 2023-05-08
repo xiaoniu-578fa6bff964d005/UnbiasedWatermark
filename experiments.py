@@ -85,10 +85,7 @@ def text_summarization_store_worker(rq, rqe):
     import json
 
     with open("data/text_summarization.txt", "w") as f:
-        while True:
-            if rqe.is_set():
-                if rq.empty():
-                    break
+        while not (rqe.is_set() and rq.empty()):
             try:
                 result = rq.get(timeout=1)
             except Empty as e:
@@ -137,10 +134,7 @@ def text_summarization_gpu_worker(
     patch_model(model)
     tokenizer = AutoTokenizer.from_pretrained(model_str)
 
-    while True:
-        if tqe.is_set():
-            if tq.empty():
-                break
+    while not (tqe.is_set() and tq.empty()):
         try:
             task = tq.get(timeout=1)
         except Empty as e:
