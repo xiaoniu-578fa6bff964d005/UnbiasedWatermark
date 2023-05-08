@@ -70,12 +70,15 @@ def text_summarization_exp_worker(tq, rq, batch_size=8):
         WatermarkLogitsProcessor as WatermarkLogitsProcessor_John,
     )
 
-    john_wp = WatermarkLogitsProcessor_John(
-        vocab=list(range(10)),  # placeholder
-        gamma=0.25,
-        delta=2.0,
-        seeding_scheme="simple_1",
-    )
+    john_wps = [
+        WatermarkLogitsProcessor_John(
+            vocab=list(range(10)),  # placeholder
+            gamma=0.5,
+            delta=delta,
+            seeding_scheme="simple_1",
+        )
+        for delta in [0.1, 0.5, 1.0, 2.0]
+    ]
 
     def group_batch(batch):
         return {k: [v] for k, v in batch.items()}
@@ -90,7 +93,8 @@ def text_summarization_exp_worker(tq, rq, batch_size=8):
         tq.put({"batch": batch, "watermark_processor": None})
         tq.put({"batch": batch, "watermark_processor": delta_wp})
         tq.put({"batch": batch, "watermark_processor": gamma_wp})
-        tq.put({"batch": batch, "watermark_processor": john_wp})
+        for john_wp in john_wps:
+            tq.put({"batch": batch, "watermark_processor": john_wp})
 
 
 def text_summarization_store_worker(rq, rqe):
