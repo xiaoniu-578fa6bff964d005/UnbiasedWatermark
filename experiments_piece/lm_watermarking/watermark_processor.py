@@ -51,7 +51,7 @@ class WatermarkBase:
         self.select_green_tokens = select_green_tokens
 
     def __repr__(self):
-        return f"WatermarkLogitsProcessor_John(vocab={repr(self.vocab)}, gamma={repr(self.gamma)}, delta={repr(self.delta)}, seeding_scheme={repr(self.seeding_scheme)}, hash_key={repr(self.hash_key)}, select_green_tokens={repr(self.select_green_tokens)})"
+        return f"WatermarkLogitsProcessor_John(vocab_size={repr(self.vocab_size)}, gamma={repr(self.gamma)}, delta={repr(self.delta)}, seeding_scheme={repr(self.seeding_scheme)}, hash_key={repr(self.hash_key)}, select_green_tokens={repr(self.select_green_tokens)})"
 
     def _seed_rng(self, input_ids: torch.LongTensor, seeding_scheme: str = None) -> None:
         # can optionally override the seeding scheme,

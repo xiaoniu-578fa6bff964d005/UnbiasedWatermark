@@ -35,7 +35,7 @@ class Gamma_WatermarkCode(AbstractWatermarkCode):
 class Gamma_Reweight(AbstractReweight):
     watermark_code_type = Gamma_WatermarkCode
 
-    def __init__(self, gamma: float):
+    def __init__(self, gamma: float = 1.0):
         self.gamma = gamma
 
     def __repr__(self):
