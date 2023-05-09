@@ -41,5 +41,5 @@ output_ids = model.generate(
 
 ```
 pip install -e .
-python experiments.py
+python -m experiments
 ```
