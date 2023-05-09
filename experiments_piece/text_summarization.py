@@ -48,37 +48,9 @@ def text_summarization_exp_worker(tq, rq, batch_size=8):
 
     cnn_daily = load_dataset("cnn_dailymail", "3.0.0").shuffle(seed=42)
 
-    from unbiased_watermark import (
-        Delta_Reweight,
-        Gamma_Reweight,
-        WatermarkLogitsProcessor,
-        PrevN_ContextCodeExtractor,
-    )
+    from .common import get_wps
 
-    delta_wp = WatermarkLogitsProcessor(
-        b"private key",
-        Delta_Reweight(),
-        PrevN_ContextCodeExtractor(5),
-    )
-    gamma_wp = WatermarkLogitsProcessor(
-        b"private key",
-        Gamma_Reweight(1),
-        PrevN_ContextCodeExtractor(5),
-    )
-
-    from .lm_watermarking.watermark_processor import (
-        WatermarkLogitsProcessor as WatermarkLogitsProcessor_John,
-    )
-
-    john_wps = [
-        WatermarkLogitsProcessor_John(
-            vocab=list(range(10)),  # placeholder
-            gamma=0.5,
-            delta=delta,
-            seeding_scheme="simple_1",
-        )
-        for delta in [0.1, 0.5, 1.0, 2.0]
-    ]
+    wps = get_wps()
 
     def group_batch(batch):
         return {k: [v] for k, v in batch.items()}
@@ -91,10 +63,8 @@ def text_summarization_exp_worker(tq, rq, batch_size=8):
 
     for batch in tqdm(ds):
         tq.put({"batch": batch, "watermark_processor": None})
-        tq.put({"batch": batch, "watermark_processor": delta_wp})
-        tq.put({"batch": batch, "watermark_processor": gamma_wp})
-        for john_wp in john_wps:
-            tq.put({"batch": batch, "watermark_processor": john_wp})
+        for wp in wps:
+            tq.put({"batch": batch, "watermark_processor": wp})
 
 
 def text_summarization_store_worker(rq, rqe):
