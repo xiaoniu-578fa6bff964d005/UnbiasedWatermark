@@ -274,4 +274,4 @@ def machine_translation_evaluate():
         result[wp_type] = bertscores
     import json
 
-    json.dump(result, open("data/machine_translation_bleu.json", "w"))
+    json.dump(result, open("data/machine_translation_bertscore.json", "w"))
