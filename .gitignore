@@ -1,3 +1,5 @@
 __pycache__
 .vscode/
 data/
+.ipynb_checkpoints/
+*.egg-info
