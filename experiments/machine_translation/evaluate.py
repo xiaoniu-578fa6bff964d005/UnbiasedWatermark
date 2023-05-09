@@ -36,27 +36,33 @@ def pipeline():
     tqe = Event()
     rq = Queue()
     rqe = Event()
+    r2q = Queue()
+    r2qe = Event()
 
     task_worker_ = Process(
         target=task_worker,
         args=(tq, rq),
         kwargs={"batch_size": 256},
     )
-    from experiments.common import bertscore_worker
+    from experiments.common import (
+        bertscore_worker,
+        simple_store_worker,
+        remove_text_worker,
+    )
 
     bertscore_workers = [
         Process(target=bertscore_worker, args=(tq, tqe, rq, i)) for i in range(num_gpus)
     ]
-    from experiments.common import simple_store_worker
-
+    rt_worker = Process(target=remove_text_worker, args=(rq, rqe, r2q))
     store_worker = Process(
         target=simple_store_worker,
-        args=("data/machine_translation_result.txt", rq, rqe),
+        args=("data/machine_translation_result.txt", r2q, r2qe),
     )
 
     task_worker_.start()
     for w in bertscore_workers:
         w.start()
+    rt_worker.start()
     store_worker.start()
 
     task_worker_.join()
@@ -64,4 +70,6 @@ def pipeline():
     for w in bertscore_workers:
         w.join()
     rqe.set()
+    rt_worker.join()
+    r2qe.set()
     store_worker.join()

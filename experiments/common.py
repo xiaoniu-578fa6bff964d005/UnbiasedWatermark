@@ -227,10 +227,24 @@ def rouge_worker(tq, tqe, rq):
         except Empty as e:
             continue
         rouge_scores = rouge.compute(
-            predictions=s_out_ds["decode"],
-            references=in_ds["highlights"],
+            predictions=batch["output"],
+            references=batch["reference"],
             rouge_types=["rouge1", "rouge2", "rougeL"],
             use_stemmer=True,
             use_aggregator=False,
         )
         rq.put({**rouge_scores, **batch})
+
+
+def remove_text_worker(tq, tqe, rq):
+    from queue import Empty
+
+    while not (tqe.is_set() and tq.empty()):
+        try:
+            batch = tq.get(timeout=1)
+        except Empty as e:
+            continue
+        for f in ["input", "output", "reference"]:
+            if f in batch:
+                del batch[f]
+        rq.put(batch)

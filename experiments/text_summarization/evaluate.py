@@ -38,13 +38,20 @@ def pipeline():
     t2qe = Event()
     rq = Queue()
     rqe = Event()
+    r2q = Queue()
+    r2qe = Event()
 
     task_worker_ = Process(
         target=task_worker,
         args=(tq, rq),
         kwargs={"batch_size": 256},
     )
-    from experiments.common import bertscore_worker, rouge_worker
+    from experiments.common import (
+        bertscore_worker,
+        rouge_worker,
+        simple_store_worker,
+        remove_text_worker,
+    )
 
     bertscore_workers = [
         Process(target=bertscore_worker, args=(tq, tqe, t2q, i))
@@ -53,11 +60,10 @@ def pipeline():
     rouge_workers = [
         Process(target=rouge_worker, args=(t2q, t2qe, rq)) for i in range(num_gpus)
     ]
-    from experiments.common import simple_store_worker
-
+    rt_worker = Process(target=remove_text_worker, args=(rq, rqe, r2q))
     store_worker = Process(
         target=simple_store_worker,
-        args=("data/text_summarization_result.txt", rq, rqe),
+        args=("data/text_summarization_result.txt", r2q, r2qe),
     )
 
     task_worker_.start()
@@ -65,6 +71,7 @@ def pipeline():
         w.start()
     for w in rouge_workers:
         w.start()
+    rt_worker.start()
     store_worker.start()
 
     task_worker_.join()
@@ -75,4 +82,6 @@ def pipeline():
     for w in rouge_workers:
         w.join()
     rqe.set()
+    rt_worker.join()
+    r2qe.set()
     store_worker.join()
