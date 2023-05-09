@@ -249,17 +249,20 @@ def machine_translation_evaluate():
     wp_types = set(out_ds["watermark_processor"])
     print(wp_types)
 
-    bleu = evaluate.load("sacrebleu")
+    bertscore = evaluate.load("bertscore")
     result = {}
     for wp_type in wp_types:
         s_out_ds = out_ds.filter(lambda x: x["watermark_processor"] == wp_type)
         assert len(s_out_ds) == len(in_ds)
-        import pdb; pdb.set_trace()
-        bleu_scores = bleu.compute(
+        # import pdb; pdb.set_trace()
+        bleu_scores = bertscore.compute(
             predictions=s_out_ds["decode"],
             references=in_ds["de"],
+            lang='de',
+            rescale_with_baseline=True
         )
-        result[wp_type] = bleu_scores['score']
+        # import pdb; pdb.set_trace()
+        result[wp_type] = bleu_scores
 
     json.dump(result, open("data/machine_translation_bleu.json", "w"))
 
