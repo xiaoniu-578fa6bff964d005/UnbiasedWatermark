@@ -5,11 +5,6 @@ import torch.multiprocessing as mp
 from torch.multiprocessing import Process, Queue, Event
 from queue import Empty
 from torch.multiprocessing import set_start_method
-import json
-import evaluate
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
-from transformers import LogitsProcessorList, TemperatureLogitsWarper
-from unbiased_watermark import patch_model
 
 try:
     set_start_method("spawn")
@@ -48,10 +43,10 @@ import torch
 #      decode
 
 
-def machine_translation_exp_worker(tq, rq, batch_size=8):
+def text_summarization_exp_worker(tq, rq, batch_size=8):
     from datasets import load_dataset
 
-    cnn_daily = load_dataset("wmt17", "de-en").shuffle(seed=42)
+    cnn_daily = load_dataset("cnn_dailymail", "3.0.0").shuffle(seed=42)
 
     from unbiased_watermark import (
         Delta_Reweight,
@@ -71,25 +66,24 @@ def machine_translation_exp_worker(tq, rq, batch_size=8):
         PrevN_ContextCodeExtractor(5),
     )
 
+    from .lm_watermarking.watermark_processor import (
+        WatermarkLogitsProcessor as WatermarkLogitsProcessor_John,
+    )
+
+    john_wps = [
+        WatermarkLogitsProcessor_John(
+            vocab=list(range(10)),  # placeholder
+            gamma=0.5,
+            delta=delta,
+            seeding_scheme="simple_1",
+        )
+        for delta in [0.1, 0.5, 1.0, 2.0]
+    ]
+
     def group_batch(batch):
         return {k: [v] for k, v in batch.items()}
 
     ds = cnn_daily["test"]
-    en_column = []
-    de_column = []
-    ids = []
-
-    for i in range(len(ds)):
-        en = ds[i]["translation"]["en"]
-        de = ds[i]["translation"]["de"]
-        ids.append(i)
-        en_column.append(en)
-        de_column.append(de)
-    
-    ds = ds.add_column("en", en_column)
-    ds = ds.add_column("de", de_column)
-    ds = ds.add_column("id", ids)
-    
     #  ds = ds.shard(num_shards=200, index=0)
     #  print("ds len:", len(ds))
     ds = ds.map(group_batch, batched=True, batch_size=batch_size)
@@ -99,16 +93,18 @@ def machine_translation_exp_worker(tq, rq, batch_size=8):
         tq.put({"batch": batch, "watermark_processor": None})
         tq.put({"batch": batch, "watermark_processor": delta_wp})
         tq.put({"batch": batch, "watermark_processor": gamma_wp})
+        for john_wp in john_wps:
+            tq.put({"batch": batch, "watermark_processor": john_wp})
 
 
-def machine_translation_store_worker(rq, rqe):
+def text_summarization_store_worker(rq, rqe):
     import json
+    import os
 
-    with open("data/machine_translation.txt", "w") as f:
-        while True:
-            if rqe.is_set():
-                if rq.empty():
-                    break
+    if not os.path.exists("data"):
+        os.makedirs("data")
+    with open("data/text_summarization.txt", "w") as f:
+        while not (rqe.is_set() and rq.empty()):
             try:
                 result = rq.get(timeout=1)
             except Empty as e:
@@ -120,8 +116,8 @@ def machine_translation_store_worker(rq, rqe):
 
 # Process the test dataset in batches to generate summaries
 def preprocess_data(example, tokenizer):
-    source = example["en"]
-    target = example["de"]
+    source = example["article"]
+    target = example["highlights"]
 
     # Encode the source and target text
     source_encoding = tokenizer(
@@ -133,7 +129,7 @@ def preprocess_data(example, tokenizer):
     )
     target_encoding = tokenizer(
         target,
-        max_length=512,
+        max_length=128,
         truncation=True,
         padding="max_length",
         return_tensors="pt",
@@ -145,18 +141,19 @@ def preprocess_data(example, tokenizer):
     }
 
 
-def machine_translation_gpu_worker(
-    tq, tqe, rq, gpu_id=0, model_str="Helsinki-NLP/opus-mt-en-de", temperature=1.0
+def text_summarization_gpu_worker(
+    tq, tqe, rq, gpu_id=0, model_str="philschmid/bart-large-cnn-samsum", temperature=1.0
 ):
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
+    from transformers import LogitsProcessorList, TemperatureLogitsWarper
+
+    from unbiased_watermark import patch_model
 
     model = AutoModelForSeq2SeqLM.from_pretrained(model_str).to(f"cuda:{gpu_id}")
     patch_model(model)
     tokenizer = AutoTokenizer.from_pretrained(model_str)
 
-    while True:
-        if tqe.is_set():
-            if tq.empty():
-                break
+    while not (tqe.is_set() and tq.empty()):
         try:
             task = tq.get(timeout=1)
         except Empty as e:
@@ -166,18 +163,20 @@ def machine_translation_gpu_worker(
         wp = task["watermark_processor"]
         lps = []
         if wp is not None:
-            wp.reset_history()
+            if "reset_history" in dir(wp):
+                wp.reset_history()
+            if "vocab_size" in dir(wp):
+                wp.vocab_size = model.config.vocab_size
             lps.append(wp)
 
         set_seed(42)
-        # import pdb; pdb.set_trace()
         batch_summaries = model.generate(
             torch.Tensor(tbatch["inputs"]).to(device=model.device).long(),
-            max_length=512,
+            max_length=128,
             do_sample=True,
             num_beams=1,
             top_k=0,
-            temperature=temperature, 
+            temperature=temperature,
             logits_warper=LogitsProcessorList(lps),
         )
         decodes = tokenizer.batch_decode(batch_summaries, skip_special_tokens=True)
@@ -186,7 +185,7 @@ def machine_translation_gpu_worker(
             rq.put({"decode": decode, "id": i, "watermark_processor": wp_str})
 
 
-def machine_translation_map():
+def text_summarization_map():
     num_gpus = torch.cuda.device_count()
 
     tq = Queue(maxsize=num_gpus)
@@ -195,18 +194,18 @@ def machine_translation_map():
     rqe = Event()
 
     exp_worker = Process(
-        target=machine_translation_exp_worker,
+        target=text_summarization_exp_worker,
         args=(tq, rq),
         kwargs={
-            "batch_size": 64
+            "batch_size": 128
             #  "batch_size": 1
         },
     )
     gpu_workers = [
-        Process(target=machine_translation_gpu_worker, args=(tq, tqe, rq, i))
+        Process(target=text_summarization_gpu_worker, args=(tq, tqe, rq, i))
         for i in range(num_gpus)
     ]
-    store_worker = Process(target=machine_translation_store_worker, args=(rq, rqe))
+    store_worker = Process(target=text_summarization_store_worker, args=(rq, rqe))
 
     exp_worker.start()
     for w in gpu_workers:
@@ -221,52 +220,35 @@ def machine_translation_map():
     store_worker.join()
 
 
-def machine_translation_evaluate():
+def text_summarization_evaluate():
     import numpy as np
 
     from datasets import load_dataset
 
-    in_ds = load_dataset("wmt17", "de-en").shuffle(seed=42)["test"]
-    en_column = []
-    de_column = []
-    ids = []
+    in_ds = load_dataset("cnn_dailymail", "3.0.0").shuffle(seed=42)["test"]
+    in_ds = in_ds.sort("id")
 
-    for i in range(len(in_ds)):
-        en = in_ds[i]["translation"]["en"]
-        de = in_ds[i]["translation"]["de"]
-        ids.append(i)
-        en_column.append(en)
-        de_column.append(de)
-    
-    in_ds = in_ds.add_column("en", en_column)
-    in_ds = in_ds.add_column("de", de_column)
-    in_ds = in_ds.add_column("id", ids)
-
-    out_ds = load_dataset("json", data_files={"test": "data/machine_translation.txt"})[
+    out_ds = load_dataset("json", data_files={"test": "data/text_summarization.txt"})[
         "test"
     ]
     out_ds = out_ds.sort("id")
     wp_types = set(out_ds["watermark_processor"])
-    print(wp_types)
 
-    bertscore = evaluate.load("bertscore")
+    import evaluate
+
+    rouge = evaluate.load("rouge")
     result = {}
     for wp_type in wp_types:
         s_out_ds = out_ds.filter(lambda x: x["watermark_processor"] == wp_type)
         assert len(s_out_ds) == len(in_ds)
-        # import pdb; pdb.set_trace()
-        bleu_scores = bertscore.compute(
+        rouge_scores = rouge.compute(
             predictions=s_out_ds["decode"],
-            references=in_ds["de"],
-            lang='de',
-            rescale_with_baseline=True
+            references=in_ds["highlights"],
+            rouge_types=["rouge1", "rouge2", "rougeL"],
+            use_stemmer=True,
+            use_aggregator=False,
         )
-        # import pdb; pdb.set_trace()
-        result[wp_type] = bleu_scores
+        result[wp_type] = rouge_scores
+    import json
 
-    json.dump(result, open("data/machine_translation_bleu.json", "w"))
-
-
-if __name__ == "__main__":
-    # machine_translation_map()
-    machine_translation_evaluate()
+    json.dump(result, open("data/text_summarization_rouge.json", "w"))
