@@ -35,3 +35,11 @@ def get_wps():
         for delta in [0.0, 1.0, 2.0]
     ]
     return [delta_wp, gamma_wp, *john_wps]
+
+
+import torch
+
+
+def get_num_gpus():
+    num_gpus = torch.cuda.device_count()
+    return num_gpus

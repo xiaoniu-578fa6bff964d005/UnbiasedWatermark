@@ -179,7 +179,9 @@ def machine_translation_gpu_worker(
 
 
 def machine_translation_map():
-    num_gpus = torch.cuda.device_count()
+    from .common import get_num_gpus
+
+    num_gpus = get_num_gpus()
 
     tq = Queue(maxsize=num_gpus)
     tqe = Event()
