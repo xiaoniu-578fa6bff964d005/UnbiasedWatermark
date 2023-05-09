@@ -66,7 +66,7 @@ def text_summarization_exp_worker(tq, rq, batch_size=8):
         PrevN_ContextCodeExtractor(5),
     )
 
-    from lm_watermarking.watermark_processor import (
+    from .lm_watermarking.watermark_processor import (
         WatermarkLogitsProcessor as WatermarkLogitsProcessor_John,
     )
 
@@ -99,7 +99,10 @@ def text_summarization_exp_worker(tq, rq, batch_size=8):
 
 def text_summarization_store_worker(rq, rqe):
     import json
+    import os
 
+    if not os.path.exists("data"):
+        os.makedirs("data")
     with open("data/text_summarization.txt", "w") as f:
         while not (rqe.is_set() and rq.empty()):
             try:
