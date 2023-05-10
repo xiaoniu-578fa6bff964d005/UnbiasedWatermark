@@ -3,6 +3,7 @@
 
 import types
 from transformers import GenerationMixin, GenerationConfig
+from transformers import LogitsProcessorList
 
 
 def patch_model(model: GenerationMixin):
