@@ -1,11 +1,14 @@
 def bleu_task(t):
-    lds, i, wp_str, bleu_scorer = t
+    lds, i, wp_str = t
 
     import random
 
     a = random.Random(i).sample(lds["output"], 2000)
     b = random.Random(i).sample(lds["reference"], 2000)
 
+    import evaluate
+
+    bleu_scorer = evaluate.load("sacrebleu")
     #  lds = s_out_ds.shuffle(seed=i)
     bleu_score = bleu_scorer.compute(
         predictions=a,
@@ -35,10 +38,6 @@ def compute_bleu():
         s_out_ds = s_out_ds.add_column("reference", in_ds["reference"])
         s_out_dss[wp_type] = s_out_ds
 
-    import evaluate
-
-    bleu_scorer = evaluate.load("sacrebleu")
-
     from concurrent.futures import ProcessPoolExecutor
     import json
 
@@ -50,7 +49,7 @@ def compute_bleu():
                 executor.map(
                     bleu_task,
                     [
-                        (s_out_ds, i, wp_str, bleu_scorer)
+                        (s_out_ds, i, wp_str)
                         for (wp_str, s_out_ds) in s_out_dss.items()
                         for i in range(100)
                     ],
