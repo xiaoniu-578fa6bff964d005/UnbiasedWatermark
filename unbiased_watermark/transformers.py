@@ -33,8 +33,7 @@ class WatermarkLogitsProcessor(LogitsProcessor):
         m.update(context_code)
         m.update(self.private_key)
         full_hash = m.digest()
-        truncated_hash = full_hash[:8]
-        seed = int.from_bytes(truncated_hash, byteorder="big")
+        seed = int.from_bytes(full_hash, "big") % (2**32 - 1)
         return seed
 
     def reset_history(self):

@@ -155,7 +155,14 @@ def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
             lps.append(wp)
 
         # for reproducibility and sufficient randomness
-        set_seed(hash(tuple(batch["id"])) % (2**32 - 1))
+        import hashlib
+
+        hash = hashlib.sha256()
+        hash.update(str(batch["id"]).encode("utf-8"))
+        seed = hash.digest()
+        seed = int.from_bytes(seed, "big") % (2**32 - 1)
+
+        set_seed(seed)
         outputs_ids = model.generate(
             tbatch["input_ids"].to(device=model.device).long(),
             do_sample=True,
