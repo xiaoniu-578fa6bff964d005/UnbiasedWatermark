@@ -154,7 +154,8 @@ def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
                 wp.vocab_size = model.config.vocab_size
             lps.append(wp)
 
-        set_seed(42)
+        # for reproducibility and sufficient randomness
+        set_seed(hash(tuple(batch["id"])) % (2**32 - 1))
         outputs_ids = model.generate(
             tbatch["input_ids"].to(device=model.device).long(),
             do_sample=True,
