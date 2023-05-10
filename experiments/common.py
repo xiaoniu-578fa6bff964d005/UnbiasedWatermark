@@ -280,3 +280,66 @@ def remove_text_worker(tq, tqe, rq):
             if f in batch:
                 del batch[f]
         rq.put(batch)
+
+
+import torch
+
+
+@torch.no_grad()
+def get_ppl(model, tbatch):
+    input_ids = tbatch["input"]["input_ids"].to(model.device)
+    attention_mask = tbatch["input"]["attention_mask"].to(model.device)
+    labels = tbatch["output"]["input_ids"].to(model.device)
+    outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
+
+    from torch.nn import CrossEntropyLoss
+
+    loss_fct = CrossEntropyLoss(reduction="none")
+
+    #  output.logits: [batch_size, sequence_length, vocab_size]
+    #  labels: [batch_size, sequence_length]
+    shape = labels.shape
+    #  loss: [batch_size, sequence_length]
+    losses = loss_fct(
+        outputs.logits.reshape(-1, outputs.logits.shape[-1]),
+        labels.view(-1),
+    ).reshape(shape)
+    label_attention_mask = tbatch["output"]["attention_mask"].to(model.device)
+    #  loss: [batch_size]
+    losses = (losses * label_attention_mask.float()).sum(
+        dim=-1
+    ) / label_attention_mask.sum(dim=-1)
+    ppl = torch.exp(losses).cpu().tolist()
+    return ppl
+
+
+def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
+    from transformers import LogitsProcessorList, TemperatureLogitsWarper
+
+    from unbiased_watermark import patch_model
+
+    model = AutoModelForSeq2SeqLM.from_pretrained(oracle_model_str).to(f"cuda:{gpu_id}")
+    patch_model(model)
+    tokenizer = AutoTokenizer.from_pretrained(oracle_model_str)
+
+    from queue import Empty
+
+    while not (tqe.is_set() and tq.empty()):
+        try:
+            batch = tq.get(timeout=1)
+        except Empty as e:
+            continue
+        tbatch = tokenize_batch(
+            batch,
+            tokenizer,
+            ["input", "output"],
+        )
+        ppl = get_ppl(model, tbatch)
+
+        rq.put(
+            {
+                **batch,
+                "ppl": ppl,
+            }
+        )
