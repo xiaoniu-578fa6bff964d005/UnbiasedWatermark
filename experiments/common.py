@@ -46,17 +46,13 @@ def get_num_gpus():
 def batched_wp_task_worker(tq, rq, get_in_ds, batch_size=8):
     ds = get_in_ds()
 
-    from experiments.common import group_batch
-
-    ds = ds.map(group_batch, batched=True, batch_size=batch_size)
-
     from experiments.common import get_wps
 
     wps = get_wps()
 
     from tqdm import tqdm
 
-    for batch in tqdm(ds):
+    for batch in tqdm(ds.iter(batch_size=batch_size), total=len(ds) // batch_size):
         tq.put({"batch": batch, "watermark_processor": None})
         for wp in wps:
             tq.put({"batch": batch, "watermark_processor": wp})
@@ -70,14 +66,13 @@ def merged_task_worker(get_in_ds, output_filepath, tq, rq, batch_size=8):
     out_ds = load_dataset("json", data_files={"test": output_filepath})["test"]
     out_ds = out_ds.sort("id")
 
-    from experiments.common import add_reference, group_batch
+    from experiments.common import add_reference
 
     ds = add_reference(in_ds, out_ds)
-    ds = ds.map(group_batch, batched=True, batch_size=batch_size)
 
     from tqdm import tqdm
 
-    for batch in tqdm(ds):
+    for batch in tqdm(ds.iter(batch_size=batch_size), total=len(ds) // batch_size):
         tq.put(batch)
 
 
@@ -120,20 +115,20 @@ def group_batch(batch):
     return {k: [v] for k, v in batch.items()}
 
 
-def tokenize_batch(example, tokenizer):
-    source = example["input"]
+def tokenize_batch(example, tokenizer, fields=["input"]):
+    result = {}
 
-    source_encoding = tokenizer(
-        source,
-        max_length=512,
-        truncation=True,
-        padding="max_length",
-        return_tensors="pt",
-    )
+    for field in fields:
+        if field in example:
+            result[field + "_ids"] = tokenizer(
+                example[field],
+                max_length=512,
+                truncation=True,
+                padding="max_length",
+                return_tensors="pt",
+            )["input_ids"]
 
-    return {
-        "input_ids": source_encoding["input_ids"],
-    }
+    return result
 
 
 def set_spawn():
@@ -209,6 +204,7 @@ def add_reference(in_ds, out_ds):
     for wp_type in wp_types:
         s_out_ds = out_ds.filter(lambda x: x["watermark_processor"] == wp_type)
         assert len(s_out_ds) == len(in_ds)
+        s_out_ds = s_out_ds.add_column("input", in_ds["input"])
         s_out_ds = s_out_ds.add_column("reference", in_ds["reference"])
         s_out_dss.append(s_out_ds)
     from datasets import concatenate_datasets
