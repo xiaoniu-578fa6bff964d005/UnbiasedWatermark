@@ -22,10 +22,10 @@ df = pd.DataFrame.from_dict(
 # import pdb; pdb.set_trace()                       
 df.head()
 
-# Ns = []
-# gamma = []
-# delta = []
+Ns = []
+gamma = []
+delta = []
 
 import seaborn as sns
-sns.violinplot(data=df[df['score']=='f1'], x="wp", y="value",
+sns.violinplot(data=df[df['score']=='rouge1'], x="wp", y="value",
 order=["None", "$\gamma$", "$\delta$"])
