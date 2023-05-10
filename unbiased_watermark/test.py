@@ -783,8 +783,6 @@ class RobustLLR_Score_Batch_Test(unittest.TestCase):
         dist_q = [float(i) / n for i in range(n + 1)]
         score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
         scores = [
-            #  RobustLLR_Score(math.exp(query.dist_p_log), math.exp(query.dist_q_log))
-            #  for query in score.batch_query.query_list
             RobustLLR_Score(math.exp(dist_p_log), math.exp(dist_q_log))
             for dist_p_log, dist_q_log in score.batch_query
         ]
@@ -792,7 +790,6 @@ class RobustLLR_Score_Batch_Test(unittest.TestCase):
         p_logits = torch.randn(5)
         q_logits = torch.randn(5)
         result1 = score.score(p_logits, q_logits)
-        #  for i, query in enumerate(score.batch_query.query_list):
         for i in range(len(score.batch_query)):
             result2 = scores[i].score(p_logits, q_logits)
             self.assertTrue(
@@ -812,8 +809,6 @@ class RobustLLR_Score_Batch_Test(unittest.TestCase):
         dist_q = [float(i) / n for i in range(n + 1)]
         score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
         scores = [
-            #  RobustLLR_Score(math.exp(query.dist_p_log), math.exp(query.dist_q_log))
-            #  for query in score.batch_query.query_list
             RobustLLR_Score(math.exp(dist_p_log), math.exp(dist_q_log))
             for dist_p_log, dist_q_log in score.batch_query
         ]
@@ -873,7 +868,6 @@ class RobustLLR_Score_Batch_Test(unittest.TestCase):
         import random
 
         random_query_subset = random.sample(
-            #  range(len(score.batch_query.query_list)), 100
             range(len(score.batch_query)),
             100,
         )
@@ -883,11 +877,7 @@ class RobustLLR_Score_Batch_Test(unittest.TestCase):
             nonlocal result2
             result2 = []
             for i in random_query_subset:
-                #  query = score.batch_query.query_list[i]
                 dist_p_log, dist_q_log = score.batch_query[i]
-                #  sscore = RobustLLR_Score(
-                #      math.exp(query.dist_p_log), math.exp(query.dist_q_log)
-                #  )
                 sscore = RobustLLR_Score(math.exp(dist_p_log), math.exp(dist_q_log))
                 result2.append(sscore.score(p_logits, q_logits))
 
@@ -913,8 +903,6 @@ class RobustLLR_Score_Batch_Test(unittest.TestCase):
         dist_q = [float(i) / n for i in range(n + 1)]
         score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
         scores = [
-            #  RobustLLR_Score(math.exp(query.dist_p_log), math.exp(query.dist_q_log))
-            #  for query in score.batch_query.query_list
             RobustLLR_Score(math.exp(dist_p_log), math.exp(dist_q_log))
             for dist_p_log, dist_q_log in score.batch_query
         ]
@@ -1163,7 +1151,6 @@ class LLM_Test(unittest.TestCase):
             n = 10
             dist_q = [float(i) / n for i in range(n + 1)]
         score = RobustLLR_Score_Batch.from_grid(dist_p, dist_q)
-        #  n_scores = len(score.batch_query.query_list)
         n_scores = len(score.batch_query)
         for k in texts:
             print(f"==={k}===")
@@ -1181,7 +1168,6 @@ class LLM_Test(unittest.TestCase):
                         prompt=prompt,
                     )
                     i = torch.argmax(torch.sum(scores[prompt_len:], dim=0))
-                    #  query = score.batch_query.query_list[i]
                     query = score.batch_query[i]
                     final_score = sum(scores[prompt_len:, i]) - math.log(n_scores)
                     print(
