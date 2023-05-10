@@ -23,12 +23,13 @@ def get_in_ds():
     from datasets import load_dataset
 
     wmt17 = load_dataset("wmt17", "de-en").shuffle(seed=42)
-    ds = wmt17["test"]
+    ds = wmt17["train"]
+
+    ds = ds.shard(num_shards=100, index=0)
+    #  print("ds len:", len(ds))
+
     ds = process_in_ds(ds)
     ds = ds.sort("id")
-
-    #  ds = ds.shard(num_shards=200, index=0)
-    #  print("ds len:", len(ds))
 
     return ds
 

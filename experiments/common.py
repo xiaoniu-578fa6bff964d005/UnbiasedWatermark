@@ -6,14 +6,18 @@ def get_wps():
         PrevN_ContextCodeExtractor,
     )
 
+    import random
+
+    random.seed(42)
+    private_key = random.getrandbits(1024).to_bytes(128, "big")
     delta_wp = WatermarkLogitsProcessor(
-        b"private key",
+        private_key,
         Delta_Reweight(),
         PrevN_ContextCodeExtractor(5),
     )
     gamma_wp = WatermarkLogitsProcessor(
-        b"private key",
-        Gamma_Reweight(1),
+        private_key,
+        Gamma_Reweight(),
         PrevN_ContextCodeExtractor(5),
     )
     from .lm_watermarking.watermark_processor import (
