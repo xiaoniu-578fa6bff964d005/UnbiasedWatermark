@@ -95,22 +95,13 @@ def pipeline():
     task_worker_ = Process(
         target=merged_task_worker,
         args=(get_in_ds, "data/text_summarization.txt", tq, rq),
-        #  kwargs={"batch_size": 32},
-        #  kwargs={"batch_size": 1},
         kwargs={"batch_size": 128},
     )
 
     ppl_worker_ = [
         Process(
             target=ppl_worker,
-            args=(
-                tq,
-                tqe,
-                rq,
-                i,
-                #  "facebook/bart-large-cnn"
-                "philschmid/bart-large-cnn-samsum",
-            ),
+            args=(tq, tqe, rq, i, "facebook/bart-large-cnn"),
         )
         for i in range(num_gpus)
     ]
