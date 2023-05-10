@@ -62,6 +62,25 @@ def batched_wp_task_worker(tq, rq, get_in_ds, batch_size=8):
             tq.put({"batch": batch, "watermark_processor": wp})
 
 
+def merged_task_worker(get_in_ds, output_filepath, tq, rq, batch_size=8):
+    in_ds = get_in_ds()
+
+    from datasets import load_dataset
+
+    out_ds = load_dataset("json", data_files={"test": output_filepath})["test"]
+    out_ds = out_ds.sort("id")
+
+    from experiments.common import add_reference, group_batch
+
+    ds = add_reference(in_ds, out_ds)
+    ds = ds.map(group_batch, batched=True, batch_size=batch_size)
+
+    from tqdm import tqdm
+
+    for batch in tqdm(ds):
+        tq.put(batch)
+
+
 def log(line: dict, f):
     import json
 

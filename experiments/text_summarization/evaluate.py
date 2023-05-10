@@ -1,26 +1,3 @@
-def task_worker(tq, rq, batch_size=8):
-    from . import get_in_ds
-
-    in_ds = get_in_ds()
-
-    from datasets import load_dataset
-
-    out_ds = load_dataset("json", data_files={"test": "data/text_summarization.txt"})[
-        "test"
-    ]
-    out_ds = out_ds.sort("id")
-
-    from experiments.common import add_reference, group_batch
-
-    ds = add_reference(in_ds, out_ds)
-    ds = ds.map(group_batch, batched=True, batch_size=batch_size)
-
-    from tqdm import tqdm
-
-    for batch in tqdm(ds):
-        tq.put(batch)
-
-
 def pipeline():
     from experiments.common import set_spawn
 
@@ -41,16 +18,20 @@ def pipeline():
     r2q = Queue()
     r2qe = Event()
 
-    task_worker_ = Process(
-        target=task_worker,
-        args=(tq, rq),
-        kwargs={"batch_size": 256},
-    )
     from experiments.common import (
+        merged_task_worker,
         bertscore_worker,
         rouge_worker,
         simple_store_worker,
         remove_text_worker,
+    )
+
+    from . import get_in_ds
+
+    task_worker_ = Process(
+        target=merged_task_worker,
+        args=(get_in_ds, "data/text_summarization.txt", tq, rq),
+        kwargs={"batch_size": 256},
     )
 
     bertscore_workers = [

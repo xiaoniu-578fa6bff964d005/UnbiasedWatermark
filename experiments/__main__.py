@@ -6,4 +6,4 @@ if __name__ == "__main__":
     ts.evaluate.pipeline()
     mt.get_output.pipeline()
     mt.evaluate.pipeline()
-    mt.evaluate.compute_bleu()
+    mt.evaluate_bleu.compute_bleu()
