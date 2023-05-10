@@ -115,18 +115,22 @@ def group_batch(batch):
     return {k: [v] for k, v in batch.items()}
 
 
-def tokenize_batch(example, tokenizer, fields=["input"]):
+def tokenize_batch(example, tokenizer, fields=["input"], max_length: int | dict = 512):
     result = {}
 
     for field in fields:
         if field in example:
-            result[field + "_ids"] = tokenizer(
+            if isinstance(max_length, dict):
+                ml = max_length[field]
+            else:
+                ml = max_length
+            result[field] = tokenizer(
                 example[field],
-                max_length=512,
+                max_length=ml,
                 truncation=True,
-                padding="max_length",
+                padding=True,
                 return_tensors="pt",
-            )["input_ids"]
+            )
 
     return result
 
@@ -178,7 +182,8 @@ def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
 
         set_seed(seed)
         outputs_ids = model.generate(
-            tbatch["input_ids"].to(device=model.device).long(),
+            tbatch["input"]["input_ids"].to(device=model.device),
+            attention_mask=tbatch["input"]["attention_mask"].to(device=model.device),
             do_sample=True,
             num_beams=1,
             top_k=0,
