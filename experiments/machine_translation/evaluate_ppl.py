@@ -34,7 +34,7 @@ def pipeline():
     ppl_worker_ = [
         Process(
             target=ppl_worker,
-            args=(tq, tqe, rq, i, "facebook/wmt19-en-de"),
+            args=(tq, tqe, rq, i, "Helsinki-NLP/opus-mt-en-de"),
         )
         for i in range(num_gpus)
     ]

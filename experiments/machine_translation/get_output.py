@@ -20,7 +20,7 @@ def pipeline():
     task_worker_ = Process(
         target=batched_wp_task_worker,
         args=(tq, rq),
-        kwargs={"get_in_ds": get_in_ds, "batch_size": 256},
+        kwargs={"get_in_ds": get_in_ds, "batch_size": 128},
     )
     gpu_workers = [
         Process(
