@@ -27,7 +27,7 @@ def pipeline():
 
     task_worker_ = Process(
         target=merged_task_worker,
-        args=(get_in_ds, "data/machine_translation.txt", tq, rq),
+        args=(get_in_ds, "data/machine_translation.txt", tq),
         kwargs={"batch_size": 256},
     )
 

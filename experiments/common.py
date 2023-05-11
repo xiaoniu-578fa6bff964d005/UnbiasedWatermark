@@ -43,7 +43,7 @@ def get_num_gpus():
     return num_gpus
 
 
-def batched_wp_task_worker(tq, rq, get_in_ds, batch_size=8):
+def batched_wp_task_worker(tq, get_in_ds, batch_size=8):
     ds = get_in_ds()
 
     from experiments.common import get_wps
@@ -59,7 +59,7 @@ def batched_wp_task_worker(tq, rq, get_in_ds, batch_size=8):
 
 
 def merged_task_worker(
-    get_in_ds, output_filepath, tq, rq, batch_size=8, watermark_only=False
+    get_in_ds, output_filepath, tq, batch_size=8, watermark_only=False
 ):
     in_ds = get_in_ds()
 
