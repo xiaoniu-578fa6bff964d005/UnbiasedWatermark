@@ -20,6 +20,13 @@ def get_wps():
         Gamma_Reweight(),
         PrevN_ContextCodeExtractor(5),
     )
+    import copy
+
+    delta_wp_woh = copy.deepcopy(delta_wp)
+    delta_wp_woh.ignore_history = True
+    gamma_wp_woh = copy.deepcopy(gamma_wp)
+    gamma_wp_woh.ignore_history = True
+
     from .lm_watermarking.watermark_processor import (
         WatermarkLogitsProcessor as WatermarkLogitsProcessor_John,
     )
@@ -33,7 +40,7 @@ def get_wps():
         )
         for delta in [0.0, 1.0, 2.0]
     ]
-    return [delta_wp, gamma_wp, *john_wps]
+    return [delta_wp, gamma_wp, delta_wp_woh, gamma_wp_woh, *john_wps]
 
 
 def get_num_gpus():
