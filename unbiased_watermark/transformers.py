@@ -14,17 +14,16 @@ class WatermarkLogitsProcessor(LogitsProcessor):
         private_key: any,
         reweight: AbstractReweight,
         context_code_extractor: AbstractContextCodeExtractor,
-        **kwargs,
+        ignore_history=False,
     ):
-        super().__init__(**kwargs)
         self.private_key = private_key
         self.reweight = reweight
         self.context_code_extractor = context_code_extractor
+        self.ignore_history = ignore_history
         self.cc_history = set()
-        self.ignore_history = False
 
     def __repr__(self):
-        return f"WatermarkLogitsProcessor({repr(self.private_key)}, {repr(self.reweight)}, {repr(self.context_code_extractor)})"
+        return f"WatermarkLogitsProcessor({repr(self.private_key)}, {repr(self.reweight)}, {repr(self.context_code_extractor)}, {repr(self.ignore_history)})"
 
     def get_rng_seed(self, context_code: any) -> any:
         if not self.ignore_history:
