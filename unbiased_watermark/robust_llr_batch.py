@@ -30,6 +30,7 @@ class RobustLLR_Score_Batch(AbstractScore):
         batch_query = [(d_p_l, d_q_l) for d_p_l in dist_p_logs for d_q_l in dist_q_logs]
         return cls(batch_query)
 
+    @torch.no_grad()
     def score(
         self, p_logits: FloatTensor, q_logits: FloatTensor, n_workers=None
     ) -> FloatTensor:
@@ -52,11 +53,14 @@ class RobustLLR_Score_Batch(AbstractScore):
         trivial_pos = max_llr < min_llr
         llr = q_logits - p_logits
         r_llr = torch.where(
-            trivial_pos, torch.tensor(0.0), torch.clamp(llr, min_llr, max_llr)
+            trivial_pos,
+            torch.tensor(0.0, device=p_logits.device),
+            torch.clamp(llr, min_llr, max_llr),
         )
         return r_llr
 
 
+@torch.no_grad()
 def get_max_llr(
     # shape = (..., 1, vocab_size)
     p_logits: FloatTensor,

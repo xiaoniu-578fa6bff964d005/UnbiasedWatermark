@@ -21,12 +21,14 @@ class WatermarkLogitsProcessor(LogitsProcessor):
         self.reweight = reweight
         self.context_code_extractor = context_code_extractor
         self.cc_history = set()
+        self.ignore_history = False
 
     def __repr__(self):
         return f"WatermarkLogitsProcessor({repr(self.private_key)}, {repr(self.reweight)}, {repr(self.context_code_extractor)})"
 
     def get_rng_seed(self, context_code: any) -> any:
-        self.cc_history.add(context_code)
+        if not self.ignore_history:
+            self.cc_history.add(context_code)
         import hashlib
 
         m = hashlib.sha256()
@@ -62,7 +64,10 @@ class WatermarkLogitsProcessor(LogitsProcessor):
             rng, scores.size(1)
         )
         reweighted_scores = self.reweight.reweight_logits(watermark_code, scores)
-        return torch.where(mask[:, None], scores, reweighted_scores)
+        if self.ignore_history:
+            return reweighted_scores
+        else:
+            return torch.where(mask[:, None], scores, reweighted_scores)
 
 
 def get_score(
@@ -77,7 +82,7 @@ def get_score(
 ) -> tuple[FloatTensor, int]:
     input_ids = tokenizer.encode(text)
     prompt_len = len(tokenizer.encode(prompt))
-    input_ids = torch.tensor(input_ids).unsqueeze(0).to(model.device)
+    input_ids = torch.tensor(input_ids, device=model.device).unsqueeze(0)
     outputs = model(input_ids)
     logits = (
         torch.cat(

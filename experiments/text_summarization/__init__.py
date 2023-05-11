@@ -35,3 +35,4 @@ def get_merged_ds(path):
 from . import get_output
 from . import evaluate
 from . import evaluate_ppl
+from . import evaluate_score
