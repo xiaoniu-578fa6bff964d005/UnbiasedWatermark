@@ -11,8 +11,6 @@ def pipeline():
 
     tq = Queue(maxsize=num_gpus)
     tqe = Event()
-    t2q = Queue(maxsize=num_gpus)
-    t2qe = Event()
     rq = Queue()
     rqe = Event()
     r2q = Queue()
@@ -20,47 +18,41 @@ def pipeline():
 
     from experiments.common import (
         merged_task_worker,
-        bertscore_worker,
-        rouge_worker,
-        simple_store_worker,
+        ppl_worker,
         remove_text_worker,
+        simple_store_worker,
     )
 
     from . import get_in_ds
 
     task_worker_ = Process(
         target=merged_task_worker,
-        args=(get_in_ds, "data/text_summarization.txt", tq, rq),
-        kwargs={"batch_size": 256},
+        args=(get_in_ds, "data/machine_translation.txt", tq, rq),
+        kwargs={"batch_size": 16},
     )
 
-    bertscore_workers = [
-        Process(target=bertscore_worker, args=(tq, tqe, t2q, i))
+    ppl_worker_ = [
+        Process(
+            target=ppl_worker,
+            args=(tq, tqe, rq, i, "facebook/mbart-large-en-ro"),
+        )
         for i in range(num_gpus)
-    ]
-    rouge_workers = [
-        Process(target=rouge_worker, args=(t2q, t2qe, rq)) for i in range(num_gpus)
     ]
     rt_worker = Process(target=remove_text_worker, args=(rq, rqe, r2q))
     store_worker = Process(
         target=simple_store_worker,
-        args=("data/text_summarization_result.txt", r2q, r2qe),
+        args=("data/machine_translation_ppl.txt", r2q, r2qe),
     )
 
     task_worker_.start()
-    for w in bertscore_workers:
-        w.start()
-    for w in rouge_workers:
+    for w in ppl_worker_:
         w.start()
     rt_worker.start()
     store_worker.start()
 
     task_worker_.join()
     tqe.set()
-    for w in bertscore_workers:
-        w.join()
-    t2qe.set()
-    for w in rouge_workers:
+    for w in ppl_worker_:
         w.join()
     rqe.set()
     rt_worker.join()

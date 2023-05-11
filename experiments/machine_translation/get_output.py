@@ -20,14 +20,14 @@ def pipeline():
     task_worker_ = Process(
         target=batched_wp_task_worker,
         args=(tq, rq),
-        kwargs={"get_in_ds": get_in_ds, "batch_size": 256},
+        kwargs={"get_in_ds": get_in_ds, "batch_size": 64},
     )
     gpu_workers = [
         Process(
             target=transformer_worker,
             args=(tq, tqe, rq, i),
             kwargs={
-                "model_str": "Helsinki-NLP/opus-mt-en-de",
+                "model_str": "facebook/mbart-large-en-ro",
                 "generation_kwargs": {
                     "max_length": 512,
                     "temperature": 1.0,
