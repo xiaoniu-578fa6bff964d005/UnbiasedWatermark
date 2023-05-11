@@ -27,7 +27,7 @@ def pipeline():
             target=transformer_worker,
             args=(tq, tqe, rq, i),
             kwargs={
-                "model_str": "Helsinki-NLP/opus-mt-en-de",
+                "model_str": "facebook/mbart-large-en-ro",
                 "generation_kwargs": {
                     "max_length": 512,
                     "temperature": 1.0,

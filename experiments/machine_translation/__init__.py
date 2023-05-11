@@ -1,7 +1,7 @@
 def process_in_ds(ds):
     ds = ds.flatten()
     ds = ds.rename_column("translation.en", "input")
-    ds = ds.rename_column("translation.de", "reference")
+    ds = ds.rename_column("translation.ro", "reference")
 
     def _to_id(s: str):
         import hashlib
@@ -22,10 +22,11 @@ def process_in_ds(ds):
 def get_in_ds():
     from datasets import load_dataset
 
-    wmt17 = load_dataset("wmt17", "de-en").shuffle(seed=42)
-    ds = wmt17["train"]
+    #  wmt17 = load_dataset("wmt17", "de-en").shuffle(seed=42)
+    wmt17 = load_dataset("wmt16", "ro-en").shuffle(seed=42)
+    ds = wmt17["test"]
 
-    ds = ds.shard(num_shards=100, index=0)
+    #  ds = ds.shard(num_shards=100, index=0)
     #  print("ds len:", len(ds))
 
     ds = process_in_ds(ds)

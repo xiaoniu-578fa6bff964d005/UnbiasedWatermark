@@ -28,13 +28,13 @@ def pipeline():
     task_worker_ = Process(
         target=merged_task_worker,
         args=(get_in_ds, "data/machine_translation.txt", tq, rq),
-        kwargs={"batch_size": 128},
+        kwargs={"batch_size": 64},
     )
 
     ppl_worker_ = [
         Process(
             target=ppl_worker,
-            args=(tq, tqe, rq, i, "Helsinki-NLP/opus-mt-en-de"),
+            args=(tq, tqe, rq, i, "facebook/mbart-large-en-ro"),
         )
         for i in range(num_gpus)
     ]
