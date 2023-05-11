@@ -367,7 +367,7 @@ def get_score(model, tbatch, wp, score):
     generation_config = GenerationConfig.from_model_config(model.config)
     logits_processor = model._get_logits_processor(
         generation_config,
-        input_ids_seq_length=input_ids.shape[-1],
+        input_ids_seq_length=labels.shape[-1],
         encoder_input_ids=input_ids,
         prefix_allowed_tokens_fn=None,
         logits_processor=[],
@@ -377,13 +377,20 @@ def get_score(model, tbatch, wp, score):
     #  decoder_input_ids: [batch_size, sequence_length]
     #  logits: [batch_size, sequence_length, vocab_size]
     logits = outputs.logits
+    old_logits = torch.clone(logits)
     new_logits = torch.clone(logits)
     for i in range(logits.size(1)):
-        new_logits[:, i] = wp(decoder_input_ids[:, : i + 1], logits[:, i])
-    all_scores = score.score(logits, new_logits)
+        pre = decoder_input_ids[:, : i + 1]
+        t = logits[:, i]
+        t = logits_processor(pre, t)
+        t = logits_warper(pre, t)
+        old_logits[:, i] = t
+        new_logits[:, i] = wp(pre, t)
+    # check contain nan, positive inf
+    all_scores = score.score(old_logits, new_logits)
     if decoder_input_ids.ndim + 2 == all_scores.ndim:
         # score is RobustLLR_Score_Batch
-        query_ids = decoder_input_ids.unsqueeze(-1).expand(
+        query_ids = labels.unsqueeze(-1).expand(
             tuple(-1 for _ in range(input_ids.ndim)) + (all_scores.size(-2),)
         )
     else:

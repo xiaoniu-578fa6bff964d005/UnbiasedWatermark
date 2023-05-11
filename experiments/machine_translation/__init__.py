@@ -39,3 +39,4 @@ from . import get_output
 from . import evaluate
 from . import evaluate_bleu
 from . import evaluate_ppl
+from . import evaluate_score

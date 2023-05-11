@@ -16,3 +16,4 @@ def add_watermark_exp():
 if __name__ == "__main__":
     add_watermark_exp()
     ts.evaluate_score.pipeline()
+    mt.evaluate_score.pipeline()
