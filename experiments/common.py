@@ -340,7 +340,8 @@ def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
             ["input", "output"],
         )
         ppl = get_ppl(model, tbatch)
-        torch.cuda.empty_cache()
+        with torch.cuda.device(model.device):
+            torch.cuda.empty_cache()
 
         rq.put(
             {
@@ -377,6 +378,11 @@ def get_score(model, tbatch, wp, score):
     #  decoder_input_ids: [batch_size, sequence_length]
     #  logits: [batch_size, sequence_length, vocab_size]
     logits = outputs.logits
+    del outputs
+    del input_ids
+    del attention_mask
+    with torch.cuda.device(model.device):
+        torch.cuda.empty_cache()
     old_logits = torch.clone(logits)
     new_logits = torch.clone(logits)
     for i in range(logits.size(1)):
@@ -391,7 +397,7 @@ def get_score(model, tbatch, wp, score):
     if decoder_input_ids.ndim + 2 == all_scores.ndim:
         # score is RobustLLR_Score_Batch
         query_ids = labels.unsqueeze(-1).expand(
-            tuple(-1 for _ in range(input_ids.ndim)) + (all_scores.size(-2),)
+            tuple(-1 for _ in range(decoder_input_ids.ndim)) + (all_scores.size(-2),)
         )
     else:
         query_ids = decoder_input_ids
