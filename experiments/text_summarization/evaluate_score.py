@@ -18,37 +18,41 @@ def pipeline():
 
     from experiments.common import (
         merged_task_worker,
-        bertscore_worker,
-        simple_store_worker,
+        score_worker,
         remove_text_worker,
+        simple_store_worker,
     )
 
     from . import get_in_ds
 
     task_worker_ = Process(
         target=merged_task_worker,
-        args=(get_in_ds, "data/machine_translation.txt", tq),
-        kwargs={"batch_size": 256},
+        args=(get_in_ds, "data/text_summarization.txt", tq),
+        kwargs={"batch_size": 8, "watermark_only": True},
     )
 
-    bertscore_workers = [
-        Process(target=bertscore_worker, args=(tq, tqe, rq, i)) for i in range(num_gpus)
+    score_worker_ = [
+        Process(
+            target=score_worker,
+            args=(tq, tqe, rq, i, "philschmid/bart-large-cnn-samsum"),
+        )
+        for i in range(num_gpus)
     ]
     rt_worker = Process(target=remove_text_worker, args=(rq, rqe, r2q))
     store_worker = Process(
         target=simple_store_worker,
-        args=("data/machine_translation_result.txt", r2q, r2qe),
+        args=("data/text_summarization_score.txt", r2q, r2qe),
     )
 
     task_worker_.start()
-    for w in bertscore_workers:
+    for w in score_worker_:
         w.start()
     rt_worker.start()
     store_worker.start()
 
     task_worker_.join()
     tqe.set()
-    for w in bertscore_workers:
+    for w in score_worker_:
         w.join()
     rqe.set()
     rt_worker.join()

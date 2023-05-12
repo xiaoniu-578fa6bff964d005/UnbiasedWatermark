@@ -3,8 +3,8 @@ def bleu_task(t):
 
     import random
 
-    a = random.Random(i).sample(lds["output"], 2000)
-    b = random.Random(i).sample(lds["reference"], 2000)
+    a = random.Random(i).sample(lds["output"], 1000)
+    b = random.Random(i).sample(lds["reference"], 1000)
 
     import evaluate
 

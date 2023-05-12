@@ -30,6 +30,7 @@ class RobustLLR_Score_Batch(AbstractScore):
         batch_query = [(d_p_l, d_q_l) for d_p_l in dist_p_logs for d_q_l in dist_q_logs]
         return cls(batch_query)
 
+    @torch.no_grad()
     def score(
         self, p_logits: FloatTensor, q_logits: FloatTensor, n_workers=None
     ) -> FloatTensor:
@@ -50,13 +51,25 @@ class RobustLLR_Score_Batch(AbstractScore):
         max_llr = get_max_llr(p_logits, q_logits, dist_p_logs, dist_q_logs)
         min_llr = -get_max_llr(q_logits, p_logits, dist_q_logs, dist_p_logs)
         trivial_pos = max_llr < min_llr
-        llr = q_logits - p_logits
+
+        llr = safe_minus(q_logits, p_logits)
         r_llr = torch.where(
-            trivial_pos, torch.tensor(0.0), torch.clamp(llr, min_llr, max_llr)
+            trivial_pos,
+            torch.tensor(0.0, device=p_logits.device),
+            torch.clamp(llr, min_llr, max_llr),
         )
         return r_llr
 
 
+def safe_minus(q_logits, p_logits):
+    return torch.where(
+        torch.isneginf(q_logits),
+        q_logits,
+        q_logits - p_logits,
+    )
+
+
+@torch.no_grad()
 def get_max_llr(
     # shape = (..., 1, vocab_size)
     p_logits: FloatTensor,
@@ -66,7 +79,7 @@ def get_max_llr(
     dist_q_logs: FloatTensor,
 ):
     # shape = (..., 1, vocab_size)
-    llr = q_logits - p_logits
+    llr = safe_minus(q_logits, p_logits)
     # shape = (..., 1, vocab_size)
     sort_index = torch.argsort(llr, dim=-1, descending=True)
 
@@ -86,9 +99,9 @@ def get_max_llr(
     modified_p_logits = torch.logaddexp(sum_p_logits, dist_p_logs)
 
     # shape = (..., 1, vocab_size)
-    llr = q_logits - p_logits
+    llr = safe_minus(q_logits, p_logits)
     # shape = (..., query_size, vocab_size)
-    modified_llr = modified_q_logits - modified_p_logits
+    modified_llr = safe_minus(modified_q_logits, modified_p_logits)
 
     # pad left modified_llr with -inf
     # shape = (..., query_size, vocab_size)

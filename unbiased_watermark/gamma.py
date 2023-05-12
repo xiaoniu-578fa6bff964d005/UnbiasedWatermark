@@ -39,7 +39,10 @@ class Gamma_Reweight(AbstractReweight):
         self.gamma = gamma
 
     def __repr__(self):
-        return f"Gamma_Reweight(gamma={self.gamma})"
+        if self.gamma == 1.0:
+            return "Gamma_Reweight()"
+        else:
+            return f"Gamma_Reweight(gamma={self.gamma})"
 
     def reweight_logits(
         self, code: AbstractWatermarkCode, p_logits: FloatTensor
