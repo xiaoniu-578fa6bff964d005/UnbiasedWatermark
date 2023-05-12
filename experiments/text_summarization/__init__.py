@@ -12,8 +12,10 @@ def get_in_ds():
     ds = process_in_ds(ds)
     ds = ds.sort("id")
 
-    #  ds = ds.shard(num_shards=200, index=0)
-    #  print("ds len:", len(ds))
+    import os
+
+    if os.environ.get("EXP_DEBUG", None) == "1":
+        ds = ds.shard(num_shards=100, index=0)
 
     return ds
 

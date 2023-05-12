@@ -56,13 +56,18 @@ def pipeline():
     store_worker.start()
 
     task_worker_.join()
+    assert task_worker_.exitcode == 0
     tqe.set()
     for w in bertscore_workers:
         w.join()
+        assert w.exitcode == 0
     t2qe.set()
     for w in rouge_workers:
         w.join()
+        assert w.exitcode == 0
     rqe.set()
     rt_worker.join()
+    assert rt_worker.exitcode == 0
     r2qe.set()
     store_worker.join()
+    assert store_worker.exitcode == 0

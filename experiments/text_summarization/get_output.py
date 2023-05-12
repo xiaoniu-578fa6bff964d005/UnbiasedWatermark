@@ -48,8 +48,11 @@ def pipeline():
     store_worker.start()
 
     task_worker_.join()
+    assert task_worker_.exitcode == 0
     tqe.set()
     for w in gpu_workers:
         w.join()
+        assert w.exitcode == 0
     rqe.set()
     store_worker.join()
+    assert store_worker.exitcode == 0

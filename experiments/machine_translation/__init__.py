@@ -26,8 +26,10 @@ def get_in_ds():
     wmt17 = load_dataset("wmt16", "ro-en").shuffle(seed=42)
     ds = wmt17["test"]
 
-    #  ds = ds.shard(num_shards=100, index=0)
-    #  print("ds len:", len(ds))
+    import os
+
+    if os.environ.get("EXP_DEBUG", None) == "1":
+        ds = ds.shard(num_shards=100, index=0)
 
     ds = process_in_ds(ds)
     ds = ds.sort("id")
