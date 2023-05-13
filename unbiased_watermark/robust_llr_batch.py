@@ -68,7 +68,10 @@ def safe_minus(q_logits, p_logits):
     #      q_logits - p_logits,
     #  )
     #  use nan_to_num_ instead of where to save memory
-    return torch.nan_to_num(q_logits - p_logits, nan=float("-inf"))
+    #  return torch.nan_to_num(q_logits - p_logits, nan=float("-inf"))
+    llr = q_logits - p_logits
+    llr.nan_to_num_(nan=float("-inf"))
+    return llr
 
 
 @torch.no_grad()
@@ -172,7 +175,11 @@ def get_max_llr_v2(
     # shape = (..., vocab_size)
     llr = safe_minus(q_logits, p_logits)
     # shape = (..., vocab_size)
-    sort_index = torch.argsort(llr, dim=-1, descending=True)
+    try:
+        sort_index = torch.argsort(llr, dim=-1, descending=True)
+    except torch.cuda.OutOfMemoryError as e:
+        #  use cpu instead
+        sort_index = torch.argsort(llr.cpu(), dim=-1, descending=True).to(llr.device)
     del llr
 
     p_logits = p_logits.gather(-1, sort_index)
