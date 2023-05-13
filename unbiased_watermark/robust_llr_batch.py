@@ -70,7 +70,7 @@ def safe_minus(q_logits, p_logits):
     #  use nan_to_num_ instead of where to save memory
     #  return torch.nan_to_num(q_logits - p_logits, nan=float("-inf"))
     llr = q_logits - p_logits
-    llr.nan_to_num_(nan=float("-inf"))
+    llr.nan_to_num_(nan=0.0)
     return llr
 
 

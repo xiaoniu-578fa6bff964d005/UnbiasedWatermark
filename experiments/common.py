@@ -40,7 +40,7 @@ def get_wps():
         )
         for delta in [0.0, 1.0, 2.0]
     ]
-    return [delta_wp, gamma_wp, delta_wp_woh, gamma_wp_woh, *john_wps]
+    return [None, delta_wp, gamma_wp, delta_wp_woh, gamma_wp_woh, *john_wps]
 
 
 def get_num_gpus():
@@ -60,7 +60,6 @@ def batched_wp_task_worker(tq, get_in_ds, batch_size=8):
     from tqdm import tqdm
 
     for batch in tqdm(ds.iter(batch_size=batch_size), total=len(ds) // batch_size):
-        tq.put({"batch": batch, "watermark_processor": None})
         for wp in wps:
             tq.put({"batch": batch, "watermark_processor": wp})
 
@@ -135,13 +134,23 @@ def tokenize_batch(example, tokenizer, fields=["input"], max_length: int | dict 
                 ml = max_length[field]
             else:
                 ml = max_length
-            result[field] = tokenizer(
-                example[field],
-                max_length=ml,
-                truncation=True,
-                padding=True,
-                return_tensors="pt",
-            )
+            if field == "output":
+                result[field] = tokenizer(
+                    example[field],
+                    max_length=ml,
+                    truncation=True,
+                    padding=True,
+                    return_tensors="pt",
+                    add_special_tokens=False,
+                )
+            else:
+                result[field] = tokenizer(
+                    example[field],
+                    max_length=ml,
+                    truncation=True,
+                    padding=True,
+                    return_tensors="pt",
+                )
 
     return result
 
@@ -197,11 +206,11 @@ def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
             attention_mask=tbatch["input"]["attention_mask"].to(device=model.device),
             do_sample=True,
             num_beams=1,
-            top_k=0,
+            #  top_k=50,   # default
             logits_warper=LogitsProcessorList(lps),
             **generation_kwargs,
         )
-        outputs = tokenizer.batch_decode(outputs_ids, skip_special_tokens=True)
+        outputs = tokenizer.batch_decode(outputs_ids, skip_special_tokens=False)
         wp_str = repr(wp)
         rq.put(
             {
@@ -226,7 +235,6 @@ def add_reference(in_ds, out_ds):
     from datasets import concatenate_datasets
 
     return s_out_dss, wp_types
-    #  return concatenate_datasets(s_out_dss)
 
 
 def bertscore_worker(tq, tqe, rq, gpu_id=0):
@@ -362,8 +370,11 @@ def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
 def get_score(model, tbatch, wp, score):
     input_ids = tbatch["input"]["input_ids"].to(model.device)
     attention_mask = tbatch["input"]["attention_mask"].to(model.device)
-    labels = tbatch["output"]["input_ids"].to(model.device)
-    decoder_input_ids = model.prepare_decoder_input_ids_from_labels(labels)
+    #  labels : [batch_size, output_sequence_length-1]
+    labels = tbatch["output"]["input_ids"].to(model.device)[..., 1:]
+    label_attention_mask = tbatch["output"]["attention_mask"].to(model.device)[..., 1:]
+    #  decoder_input_ids : [batch_size, output_sequence_length-1]
+    decoder_input_ids = tbatch["output"]["input_ids"].to(model.device)[..., :-1]
     outputs = model(
         input_ids=input_ids,
         attention_mask=attention_mask,
@@ -382,8 +393,7 @@ def get_score(model, tbatch, wp, score):
     )
     logits_warper = model._get_logits_warper(generation_config)
 
-    #  decoder_input_ids: [batch_size, sequence_length]
-    #  logits: [batch_size, sequence_length, vocab_size]
+    #  logits: [batch_size, output_sequence_length-1, vocab_size]
     logits = outputs.logits
     del outputs
     del input_ids
@@ -404,25 +414,26 @@ def get_score(model, tbatch, wp, score):
     from unbiased_watermark import RobustLLR_Score_Batch_v1, RobustLLR_Score_Batch_v2
 
     if isinstance(score, RobustLLR_Score_Batch_v1):
-        #  all_scores: [batch_size, seq_len, query_size, vocab_size]
+        #  all_scores: [batch_size, output_sequence_length-1, query_size, vocab_size]
         all_scores = score.score(old_logits, new_logits)
-        #  query_ids: [batch_size, seq_len, query_size]
+        #  query_ids: [batch_size, output_sequence_length-1, query_size]
         query_ids = labels.unsqueeze(-1).expand(
             tuple(-1 for _ in range(decoder_input_ids.ndim)) + (all_scores.size(-2),)
         )
-        #  scores: [batch_size, sequence_length, query_size]
+        #  scores: [batch_size, output_sequence_length-1, query_size]
         scores = torch.gather(all_scores, -1, query_ids.unsqueeze(-1)).squeeze(-1)
     elif isinstance(score, RobustLLR_Score_Batch_v2):
-        #  llr: [batch_size, seq_len, vocab_size]
-        #  max_llr: [batch_size, seq_len, query_size]
+        #  llr: [batch_size, output_sequence_length-1, vocab_size]
+        #  max_llr: [batch_size, output_sequence_length-1, query_size]
         llr, max_llr, min_llr = score.score(old_logits, new_logits)
-        #  query_ids: [batch_size, seq_len]
+        #  query_ids: [batch_size, output_sequence_length-1]
         query_ids = labels
-        #  unclipped_scores: [batch_size, sequence_length]
+        input_ids = tbatch["input"]["input_ids"]
+        #  unclipped_scores: [batch_size, output_sequence_length-1]
         unclipped_scores = torch.gather(llr, -1, query_ids.unsqueeze(-1)).squeeze(-1)
-        #  scores: [batch_size, sequence_length, query_size]
+        #  scores: [batch_size, output_sequence_length-1, query_size]
         scores = torch.clamp(unclipped_scores.unsqueeze(-1), min_llr, max_llr)
-    return scores
+    return scores * label_attention_mask.unsqueeze(-1)
 
 
 def score_worker(tq, tqe, rq, gpu_id, model_str):
