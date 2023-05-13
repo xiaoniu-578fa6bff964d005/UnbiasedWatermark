@@ -399,17 +399,29 @@ def get_score(model, tbatch, wp, score):
         t = logits_warper(pre, t)
         old_logits[:, i] = t
         new_logits[:, i] = wp(pre, t)
-    # check contain nan, positive inf
-    all_scores = score.score(old_logits, new_logits)
-    if decoder_input_ids.ndim + 2 == all_scores.ndim:
-        # score is RobustLLR_Score_Batch
+    del logits
+
+    from unbiased_watermark import RobustLLR_Score_Batch_v1, RobustLLR_Score_Batch_v2
+
+    if isinstance(score, RobustLLR_Score_Batch_v1):
+        #  all_scores: [batch_size, seq_len, query_size, vocab_size]
+        all_scores = score.score(old_logits, new_logits)
+        #  query_ids: [batch_size, seq_len, query_size]
         query_ids = labels.unsqueeze(-1).expand(
             tuple(-1 for _ in range(decoder_input_ids.ndim)) + (all_scores.size(-2),)
         )
-    else:
-        query_ids = decoder_input_ids
-    #  scores: [batch_size, sequence_length] or [batch_size, sequence_length, query_size]
-    scores = torch.gather(all_scores, -1, query_ids.unsqueeze(-1)).squeeze(-1)
+        #  scores: [batch_size, sequence_length, query_size]
+        scores = torch.gather(all_scores, -1, query_ids.unsqueeze(-1)).squeeze(-1)
+    elif isinstance(score, RobustLLR_Score_Batch_v2):
+        #  llr: [batch_size, seq_len, vocab_size]
+        #  max_llr: [batch_size, seq_len, query_size]
+        llr, max_llr, min_llr = score.score(old_logits, new_logits)
+        #  query_ids: [batch_size, seq_len]
+        query_ids = labels
+        #  unclipped_scores: [batch_size, sequence_length]
+        unclipped_scores = torch.gather(llr, -1, query_ids.unsqueeze(-1)).squeeze(-1)
+        #  scores: [batch_size, sequence_length, query_size]
+        scores = torch.clamp(unclipped_scores.unsqueeze(-1), min_llr, max_llr)
     return scores
 
 
@@ -420,11 +432,11 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
     model = AutoModelForSeq2SeqLM.from_pretrained(model_str).to(f"cuda:{gpu_id}")
     tokenizer = AutoTokenizer.from_pretrained(model_str)
 
-    from unbiased_watermark import RobustLLR_Score_Batch
+    from unbiased_watermark import RobustLLR_Score_Batch_v1, RobustLLR_Score_Batch_v2
 
     grid_size = 10
     dist_qs = [i / grid_size for i in range(0, grid_size + 1)]
-    scorer = RobustLLR_Score_Batch.from_grid([0.0], dist_qs)
+    scorer = RobustLLR_Score_Batch_v2.from_grid([0.0], dist_qs)
 
     from queue import Empty
 
@@ -453,6 +465,10 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
         )
         # score: [batch_size, sequence_length, query_size]
         score = get_score(model, tbatch, wp, scorer)
+
+        import gc
+
+        gc.collect()
         # score: [batch_size, query_size]
         sum_score = score.sum(-2)
         # best_index: [batch_size]
