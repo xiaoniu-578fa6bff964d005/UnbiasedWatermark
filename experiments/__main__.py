@@ -7,7 +7,7 @@ def add_watermark_exp():
     ts.get_output.pipeline()
     print("ts.evaluate.pipeline()")
     ts.evaluate.pipeline()
-    print("ts.evaluate_bleu.compute_bleu()")
+    print("ts.evaluate_ppl.pipeline()")
     ts.evaluate_ppl.pipeline()
 
     print("mt.get_output.pipeline()")

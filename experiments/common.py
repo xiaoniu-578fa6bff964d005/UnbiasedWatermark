@@ -308,7 +308,7 @@ import torch
 def get_ppl(model, tbatch):
     input_ids = tbatch["input"]["input_ids"].to(model.device)
     attention_mask = tbatch["input"]["attention_mask"].to(model.device)
-    labels = tbatch["output"]["input_ids"].to(model.device)
+    labels = tbatch["output"]["input_ids"][..., 1:].to(model.device)
     outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
 
     from torch.nn import CrossEntropyLoss
@@ -323,7 +323,7 @@ def get_ppl(model, tbatch):
         outputs.logits.reshape(-1, outputs.logits.shape[-1]),
         labels.view(-1),
     ).reshape(shape)
-    label_attention_mask = tbatch["output"]["attention_mask"].to(model.device)
+    label_attention_mask = tbatch["output"]["attention_mask"][..., 1:].to(model.device)
     #  loss: [batch_size]
     losses = (losses * label_attention_mask.float()).sum(
         dim=-1
@@ -371,10 +371,10 @@ def get_score(model, tbatch, wp, score):
     input_ids = tbatch["input"]["input_ids"].to(model.device)
     attention_mask = tbatch["input"]["attention_mask"].to(model.device)
     #  labels : [batch_size, output_sequence_length-1]
-    labels = tbatch["output"]["input_ids"].to(model.device)[..., 1:]
-    label_attention_mask = tbatch["output"]["attention_mask"].to(model.device)[..., 1:]
+    labels = tbatch["output"]["input_ids"][..., 1:].to(model.device)
+    label_attention_mask = tbatch["output"]["attention_mask"][..., 1:].to(model.device)
     #  decoder_input_ids : [batch_size, output_sequence_length-1]
-    decoder_input_ids = tbatch["output"]["input_ids"].to(model.device)[..., :-1]
+    decoder_input_ids = tbatch["output"]["input_ids"][..., :-1].to(model.device)
     outputs = model(
         input_ids=input_ids,
         attention_mask=attention_mask,
