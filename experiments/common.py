@@ -20,6 +20,13 @@ def get_wps():
         Gamma_Reweight(),
         PrevN_ContextCodeExtractor(5),
     )
+    import copy
+
+    delta_wp_woh = copy.deepcopy(delta_wp)
+    delta_wp_woh.ignore_history = True
+    gamma_wp_woh = copy.deepcopy(gamma_wp)
+    gamma_wp_woh.ignore_history = True
+
     from .lm_watermarking.watermark_processor import (
         WatermarkLogitsProcessor as WatermarkLogitsProcessor_John,
     )
@@ -33,7 +40,7 @@ def get_wps():
         )
         for delta in [0.0, 1.0, 2.0]
     ]
-    return [delta_wp, gamma_wp, *john_wps]
+    return [None, delta_wp, gamma_wp, delta_wp_woh, gamma_wp_woh, *john_wps]
 
 
 def get_num_gpus():
@@ -43,7 +50,7 @@ def get_num_gpus():
     return num_gpus
 
 
-def batched_wp_task_worker(tq, rq, get_in_ds, batch_size=8):
+def batched_wp_task_worker(tq, get_in_ds, batch_size=8):
     ds = get_in_ds()
 
     from experiments.common import get_wps
@@ -53,13 +60,12 @@ def batched_wp_task_worker(tq, rq, get_in_ds, batch_size=8):
     from tqdm import tqdm
 
     for batch in tqdm(ds.iter(batch_size=batch_size), total=len(ds) // batch_size):
-        tq.put({"batch": batch, "watermark_processor": None})
         for wp in wps:
             tq.put({"batch": batch, "watermark_processor": wp})
 
 
 def merged_task_worker(
-    get_in_ds, output_filepath, tq, rq, batch_size=8, watermark_only=False
+    get_in_ds, output_filepath, tq, batch_size=8, watermark_only=False
 ):
     in_ds = get_in_ds()
 
@@ -128,13 +134,23 @@ def tokenize_batch(example, tokenizer, fields=["input"], max_length: int | dict 
                 ml = max_length[field]
             else:
                 ml = max_length
-            result[field] = tokenizer(
-                example[field],
-                max_length=ml,
-                truncation=True,
-                padding=True,
-                return_tensors="pt",
-            )
+            if field == "output":
+                result[field] = tokenizer(
+                    example[field],
+                    max_length=ml,
+                    truncation=True,
+                    padding=True,
+                    return_tensors="pt",
+                    add_special_tokens=False,
+                )
+            else:
+                result[field] = tokenizer(
+                    example[field],
+                    max_length=ml,
+                    truncation=True,
+                    padding=True,
+                    return_tensors="pt",
+                )
 
     return result
 
@@ -190,11 +206,11 @@ def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
             attention_mask=tbatch["input"]["attention_mask"].to(device=model.device),
             do_sample=True,
             num_beams=1,
-            top_k=0,
+            #  top_k=50,   # default
             logits_warper=LogitsProcessorList(lps),
             **generation_kwargs,
         )
-        outputs = tokenizer.batch_decode(outputs_ids, skip_special_tokens=True)
+        outputs = tokenizer.batch_decode(outputs_ids, skip_special_tokens=False)
         wp_str = repr(wp)
         rq.put(
             {
@@ -219,7 +235,6 @@ def add_reference(in_ds, out_ds):
     from datasets import concatenate_datasets
 
     return s_out_dss, wp_types
-    #  return concatenate_datasets(s_out_dss)
 
 
 def bertscore_worker(tq, tqe, rq, gpu_id=0):
@@ -293,7 +308,7 @@ import torch
 def get_ppl(model, tbatch):
     input_ids = tbatch["input"]["input_ids"].to(model.device)
     attention_mask = tbatch["input"]["attention_mask"].to(model.device)
-    labels = tbatch["output"]["input_ids"].to(model.device)
+    labels = tbatch["output"]["input_ids"][..., 1:].to(model.device)
     outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
 
     from torch.nn import CrossEntropyLoss
@@ -308,7 +323,7 @@ def get_ppl(model, tbatch):
         outputs.logits.reshape(-1, outputs.logits.shape[-1]),
         labels.view(-1),
     ).reshape(shape)
-    label_attention_mask = tbatch["output"]["attention_mask"].to(model.device)
+    label_attention_mask = tbatch["output"]["attention_mask"][..., 1:].to(model.device)
     #  loss: [batch_size]
     losses = (losses * label_attention_mask.float()).sum(
         dim=-1
@@ -355,8 +370,11 @@ def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
 def get_score(model, tbatch, wp, score):
     input_ids = tbatch["input"]["input_ids"].to(model.device)
     attention_mask = tbatch["input"]["attention_mask"].to(model.device)
-    labels = tbatch["output"]["input_ids"].to(model.device)
-    decoder_input_ids = model.prepare_decoder_input_ids_from_labels(labels)
+    #  labels : [batch_size, output_sequence_length-1]
+    labels = tbatch["output"]["input_ids"][..., 1:].to(model.device)
+    label_attention_mask = tbatch["output"]["attention_mask"][..., 1:].to(model.device)
+    #  decoder_input_ids : [batch_size, output_sequence_length-1]
+    decoder_input_ids = tbatch["output"]["input_ids"][..., :-1].to(model.device)
     outputs = model(
         input_ids=input_ids,
         attention_mask=attention_mask,
@@ -375,8 +393,7 @@ def get_score(model, tbatch, wp, score):
     )
     logits_warper = model._get_logits_warper(generation_config)
 
-    #  decoder_input_ids: [batch_size, sequence_length]
-    #  logits: [batch_size, sequence_length, vocab_size]
+    #  logits: [batch_size, output_sequence_length-1, vocab_size]
     logits = outputs.logits
     del outputs
     del input_ids
@@ -392,18 +409,31 @@ def get_score(model, tbatch, wp, score):
         t = logits_warper(pre, t)
         old_logits[:, i] = t
         new_logits[:, i] = wp(pre, t)
-    # check contain nan, positive inf
-    all_scores = score.score(old_logits, new_logits)
-    if decoder_input_ids.ndim + 2 == all_scores.ndim:
-        # score is RobustLLR_Score_Batch
+    del logits
+
+    from unbiased_watermark import RobustLLR_Score_Batch_v1, RobustLLR_Score_Batch_v2
+
+    if isinstance(score, RobustLLR_Score_Batch_v1):
+        #  all_scores: [batch_size, output_sequence_length-1, query_size, vocab_size]
+        all_scores = score.score(old_logits, new_logits)
+        #  query_ids: [batch_size, output_sequence_length-1, query_size]
         query_ids = labels.unsqueeze(-1).expand(
             tuple(-1 for _ in range(decoder_input_ids.ndim)) + (all_scores.size(-2),)
         )
-    else:
-        query_ids = decoder_input_ids
-    #  scores: [batch_size, sequence_length] or [batch_size, sequence_length, query_size]
-    scores = torch.gather(all_scores, -1, query_ids.unsqueeze(-1)).squeeze(-1)
-    return scores
+        #  scores: [batch_size, output_sequence_length-1, query_size]
+        scores = torch.gather(all_scores, -1, query_ids.unsqueeze(-1)).squeeze(-1)
+    elif isinstance(score, RobustLLR_Score_Batch_v2):
+        #  llr: [batch_size, output_sequence_length-1, vocab_size]
+        #  max_llr: [batch_size, output_sequence_length-1, query_size]
+        llr, max_llr, min_llr = score.score(old_logits, new_logits)
+        #  query_ids: [batch_size, output_sequence_length-1]
+        query_ids = labels
+        input_ids = tbatch["input"]["input_ids"]
+        #  unclipped_scores: [batch_size, output_sequence_length-1]
+        unclipped_scores = torch.gather(llr, -1, query_ids.unsqueeze(-1)).squeeze(-1)
+        #  scores: [batch_size, output_sequence_length-1, query_size]
+        scores = torch.clamp(unclipped_scores.unsqueeze(-1), min_llr, max_llr)
+    return scores * label_attention_mask.unsqueeze(-1)
 
 
 def score_worker(tq, tqe, rq, gpu_id, model_str):
@@ -413,11 +443,11 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
     model = AutoModelForSeq2SeqLM.from_pretrained(model_str).to(f"cuda:{gpu_id}")
     tokenizer = AutoTokenizer.from_pretrained(model_str)
 
-    from unbiased_watermark import RobustLLR_Score_Batch
+    from unbiased_watermark import RobustLLR_Score_Batch_v1, RobustLLR_Score_Batch_v2
 
     grid_size = 10
     dist_qs = [i / grid_size for i in range(0, grid_size + 1)]
-    scorer = RobustLLR_Score_Batch.from_grid([0.0], dist_qs)
+    scorer = RobustLLR_Score_Batch_v2.from_grid([0.0], dist_qs)
 
     from queue import Empty
 
@@ -446,6 +476,10 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
         )
         # score: [batch_size, sequence_length, query_size]
         score = get_score(model, tbatch, wp, scorer)
+
+        import gc
+
+        gc.collect()
         # score: [batch_size, query_size]
         sum_score = score.sum(-2)
         # best_index: [batch_size]

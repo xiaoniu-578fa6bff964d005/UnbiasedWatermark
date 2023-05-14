@@ -1,0 +1,11 @@
+datasets >= 2.12.0
+transformers >= 4.28.1
+evaluate
+transformers[sentencepiece]
+rouge-score
+bert-score
+sacrebleu
+torch >= 2.0
+torchvision
+torchaudio
+scipy

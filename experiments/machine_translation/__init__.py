@@ -22,12 +22,14 @@ def process_in_ds(ds):
 def get_in_ds():
     from datasets import load_dataset
 
-    #  wmt17 = load_dataset("wmt17", "de-en").shuffle(seed=42)
     wmt17 = load_dataset("wmt16", "ro-en").shuffle(seed=42)
     ds = wmt17["test"]
 
-    #  ds = ds.shard(num_shards=100, index=0)
-    #  print("ds len:", len(ds))
+    import os
+
+    if os.environ.get("EXP_DEBUG", None) == "1":
+        #  ds = ds.shard(num_shards=100, index=0)
+        ds = ds.select(range(0, 2))
 
     ds = process_in_ds(ds)
     ds = ds.sort("id")

@@ -19,7 +19,7 @@ def pipeline():
 
     task_worker_ = Process(
         target=batched_wp_task_worker,
-        args=(tq, rq),
+        args=(tq,),
         kwargs={"get_in_ds": get_in_ds, "batch_size": 64},
     )
     gpu_workers = [
@@ -48,8 +48,11 @@ def pipeline():
     store_worker.start()
 
     task_worker_.join()
+    assert task_worker_.exitcode == 0
     tqe.set()
     for w in gpu_workers:
         w.join()
+        assert w.exitcode == 0
     rqe.set()
     store_worker.join()
+    assert store_worker.exitcode == 0
