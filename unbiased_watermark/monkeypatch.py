@@ -27,5 +27,9 @@ def patch_model(model: GenerationMixin):
             )
         return warpers
 
+    def _clear_patch_context(self):
+        context.clear()
+
     model.generate = types.MethodType(generate, model)
     model._get_logits_warper = types.MethodType(_get_logits_warper, model)
+    model._clear_patch_context = types.MethodType(_clear_patch_context, model)

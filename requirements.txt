@@ -9,3 +9,4 @@ torch >= 2.0
 torchvision
 torchaudio
 scipy
+pylatexenc

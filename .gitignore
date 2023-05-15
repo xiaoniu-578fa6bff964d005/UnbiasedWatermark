@@ -4,3 +4,4 @@ data/
 data*/
 .ipynb_checkpoints/
 *.egg-info
+models/
