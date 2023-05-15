@@ -150,7 +150,9 @@ class RobustLLR_Score_Batch_v2(RobustLLR_Score_Batch_Base):
         p_logits = F.log_softmax(p_logits, dim=-1)
 
         max_llr = get_max_llr_v2(p_logits, q_logits, self.batch_query)
-        min_llr = -get_max_llr_v2(q_logits, p_logits, self.batch_query)
+        min_llr = -get_max_llr_v2(
+            q_logits, p_logits, [(q, p) for p, q in self.batch_query]
+        )
         trivial_pos = max_llr < min_llr
         max_llr = torch.where(
             trivial_pos, torch.tensor(0.0, device=max_llr.device), max_llr
