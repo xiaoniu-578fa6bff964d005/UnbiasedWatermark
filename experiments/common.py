@@ -128,29 +128,28 @@ def group_batch(batch):
 def tokenize_batch(example, tokenizer, fields=["input"], max_length: int | dict = 512):
     result = {}
 
+    if tokenizer.name_or_path == "facebook/mbart-large-en-ro":
+        tokenizer.tgt_lang = "ro_RO"
+
     for field in fields:
         if field in example:
+            kwargs = {}
             if isinstance(max_length, dict):
-                ml = max_length[field]
+                kwargs["max_length"] = max_length[field]
             else:
-                ml = max_length
+                kwargs["max_length"] = max_length
+            if field in ["output", "reference"]:
+                kwargs["text_target"] = example[field]
+            else:
+                kwargs["text"] = example[field]
             if field == "output":
-                result[field] = tokenizer(
-                    example[field],
-                    max_length=ml,
-                    truncation=True,
-                    padding=True,
-                    return_tensors="pt",
-                    add_special_tokens=False,
-                )
-            else:
-                result[field] = tokenizer(
-                    example[field],
-                    max_length=ml,
-                    truncation=True,
-                    padding=True,
-                    return_tensors="pt",
-                )
+                kwargs["add_special_tokens"] = False
+            result[field] = tokenizer(
+                **kwargs,
+                truncation=True,
+                padding=True,
+                return_tensors="pt",
+            )
 
     return result
 
@@ -162,6 +161,18 @@ def set_spawn():
         mp.set_start_method("spawn")
     except RuntimeError:
         pass
+
+
+def remove_tailing_pad_s(s: str):
+    index = s.find("<pad>")
+    if index == -1:
+        return s
+    else:
+        return s[:index]
+
+
+def remove_tailing_pad(strs: list[str]):
+    return [remove_tailing_pad_s(s) for s in strs]
 
 
 def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
@@ -211,10 +222,13 @@ def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
             **generation_kwargs,
         )
         outputs = tokenizer.batch_decode(outputs_ids, skip_special_tokens=False)
+        outputs = remove_tailing_pad(outputs)
+        display_outputs = tokenizer.batch_decode(outputs_ids, skip_special_tokens=True)
         wp_str = repr(wp)
         rq.put(
             {
                 "output": outputs,
+                "display_output": display_outputs,
                 "id": batch["id"],
                 "watermark_processor": [wp_str] * len(outputs),
             }
@@ -254,7 +268,7 @@ def bertscore_worker(tq, tqe, rq, gpu_id=0):
             batch = tq.get(timeout=1)
         except Empty as e:
             continue
-        (P, R, F) = scorer.score(batch["output"], batch["reference"])
+        (P, R, F) = scorer.score(batch["display_output"], batch["reference"])
         rq.put(
             {
                 **batch,
@@ -278,7 +292,7 @@ def rouge_worker(tq, tqe, rq):
         except Empty as e:
             continue
         rouge_scores = rouge.compute(
-            predictions=batch["output"],
+            predictions=batch["display_output"],
             references=batch["reference"],
             rouge_types=["rouge1", "rouge2", "rougeL"],
             use_stemmer=True,
@@ -295,7 +309,7 @@ def remove_text_worker(tq, tqe, rq):
             batch = tq.get(timeout=1)
         except Empty as e:
             continue
-        for f in ["input", "output", "reference"]:
+        for f in ["input", "output", "reference", "display_output"]:
             if f in batch:
                 del batch[f]
         rq.put(batch)
@@ -336,10 +350,7 @@ def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
-    from unbiased_watermark import patch_model
-
     model = AutoModelForSeq2SeqLM.from_pretrained(oracle_model_str).to(f"cuda:{gpu_id}")
-    patch_model(model)
     tokenizer = AutoTokenizer.from_pretrained(oracle_model_str)
 
     from queue import Empty
@@ -428,7 +439,6 @@ def get_score(model, tbatch, wp, score):
         llr, max_llr, min_llr = score.score(old_logits, new_logits)
         #  query_ids: [batch_size, output_sequence_length-1]
         query_ids = labels
-        input_ids = tbatch["input"]["input_ids"]
         #  unclipped_scores: [batch_size, output_sequence_length-1]
         unclipped_scores = torch.gather(llr, -1, query_ids.unsqueeze(-1)).squeeze(-1)
         #  scores: [batch_size, output_sequence_length-1, query_size]
@@ -495,17 +505,6 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
             .cpu()
             .tolist()
         )
-
-        #  best_score = (
-        #      torch.gather(
-        #          score,
-        #          -1,
-        #          best_index.unsqueeze(-1).unsqueeze(-1).expand(-1, score.size(-2), -1),
-        #      )
-        #      .squeeze(-1)
-        #      .cpu()
-        #      .tolist()
-        #  )
 
         rq.put(
             {

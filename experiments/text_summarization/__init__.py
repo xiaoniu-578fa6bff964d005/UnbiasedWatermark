@@ -13,8 +13,9 @@ def get_in_ds():
     import os
 
     if os.environ.get("EXP_DEBUG", None) == "1":
-        #  ds = ds.shard(num_shards=100, index=0)
         ds = ds.select(range(0, 2))
+    if os.environ.get("EXP_DEBUG", None) == "2":
+        ds = ds.shard(num_shards=100, index=0)
 
     ds = process_in_ds(ds)
     ds = ds.sort("id")
