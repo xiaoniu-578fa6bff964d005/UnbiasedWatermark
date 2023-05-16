@@ -1,20 +1,31 @@
 def bleu_task(t):
-    lds, i, wp_str = t
+    i, wp_str = t
+    global sval
+    lds = sval[wp_str]
 
     import random
 
-    a = random.Random(i).sample(lds["display_output"], len(lds) // 2)
-    b = random.Random(i).sample(lds["reference"], len(lds) // 2)
+    a = random.Random(i).sample(lds["display_output"], len(lds["display_output"]) // 2)
+    b = random.Random(i).sample(lds["reference"], len(lds["reference"]) // 2)
 
-    import evaluate
-
-    bleu_scorer = evaluate.load("sacrebleu")
-    #  lds = s_out_ds.shuffle(seed=i)
+    global bleu_scorer
     bleu_score = bleu_scorer.compute(
         predictions=a,
         references=b,
     )
     return {"watermark_processor": wp_str, "bleu": bleu_score["score"]}
+
+
+def set_global(args):
+    global sval
+    sval = {
+        k: {k2: [s for s in v2] for (k2, v2) in v.items()} for (k, v) in args.items()
+    }
+
+    global bleu_scorer
+    import evaluate
+
+    bleu_scorer = evaluate.load("sacrebleu")
 
 
 def compute_bleu():
@@ -41,8 +52,18 @@ def compute_bleu():
     from concurrent.futures import ProcessPoolExecutor
     import json
 
+    import multiprocessing as mp
+
+    sval = {
+        wp_str: {
+            "display_output": list(s_out_ds["display_output"]),
+            "reference": list(s_out_ds["reference"]),
+        }
+        for (wp_str, s_out_ds) in s_out_dss.items()
+    }
+
     with open("data/machine_translation_bleu.txt", "w") as f:
-        with ProcessPoolExecutor() as executor:
+        with ProcessPoolExecutor(initializer=set_global, initargs=(sval,)) as executor:
             from tqdm import tqdm
 
             num = 1000
@@ -50,7 +71,7 @@ def compute_bleu():
                 executor.map(
                     bleu_task,
                     [
-                        (s_out_ds, i, wp_str)
+                        (i, wp_str)
                         for (wp_str, s_out_ds) in s_out_dss.items()
                         for i in range(num)
                     ],
