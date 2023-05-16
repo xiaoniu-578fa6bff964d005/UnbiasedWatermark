@@ -45,16 +45,17 @@ def compute_bleu():
         with ProcessPoolExecutor() as executor:
             from tqdm import tqdm
 
+            num = 1000
             for r in tqdm(
                 executor.map(
                     bleu_task,
                     [
                         (s_out_ds, i, wp_str)
                         for (wp_str, s_out_ds) in s_out_dss.items()
-                        for i in range(100)
+                        for i in range(num)
                     ],
                 ),
-                total=len(wp_types) * 100,
+                total=len(wp_types) * num,
             ):
                 f.write(json.dumps(r))
                 f.write("\n")
