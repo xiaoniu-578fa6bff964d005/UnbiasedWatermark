@@ -66,7 +66,7 @@ def compute_bleu():
         with ProcessPoolExecutor(initializer=set_global, initargs=(sval,)) as executor:
             from tqdm import tqdm
 
-            num = 1000
+            num = 10000
             for r in tqdm(
                 executor.map(
                     bleu_task,
