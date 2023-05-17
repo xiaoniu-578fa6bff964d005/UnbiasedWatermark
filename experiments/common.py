@@ -422,6 +422,14 @@ def get_score(model, tbatch, wp, score):
         new_logits[:, i] = wp(pre, t)
     del logits
 
+    # compute entropy
+    import torch.nn.functional as F
+
+    _logits = F.log_softmax(old_logits, dim=-1)
+    _logits.nan_to_num_()
+    entropy = -(torch.exp(_logits) * _logits).sum(dim=-1)
+
+    # compute score
     from unbiased_watermark import RobustLLR_Score_Batch_v1, RobustLLR_Score_Batch_v2
 
     if isinstance(score, RobustLLR_Score_Batch_v1):
@@ -443,7 +451,11 @@ def get_score(model, tbatch, wp, score):
         unclipped_scores = torch.gather(llr, -1, query_ids.unsqueeze(-1)).squeeze(-1)
         #  scores: [batch_size, output_sequence_length-1, query_size]
         scores = torch.clamp(unclipped_scores.unsqueeze(-1), min_llr, max_llr)
-    return scores * label_attention_mask.unsqueeze(-1)
+    return (
+        scores * label_attention_mask.unsqueeze(-1),
+        entropy * label_attention_mask,
+        label_attention_mask,
+    )
 
 
 def score_worker(tq, tqe, rq, gpu_id, model_str):
@@ -485,7 +497,9 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
             ["input", "output"],
         )
         # score: [batch_size, sequence_length, query_size]
-        score = get_score(model, tbatch, wp, scorer)
+        # entropy: [batch_size, sequence_length]
+        # label_attention_mask: [batch_size, sequence_length]
+        score, entropy, label_attention_mask = get_score(model, tbatch, wp, scorer)
 
         import gc
 
@@ -506,10 +520,39 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
             .tolist()
         )
 
+        # best_score: [batch_size, sequence_length]
+        best_score = (
+            torch.gather(
+                score,
+                -1,
+                best_index.unsqueeze(-1).unsqueeze(-1).expand(-1, score.size(-2), -1),
+            )
+            .squeeze(-1)
+            .cpu()
+            .tolist()
+        )
+        #  lens: [batch_size]
+        cum_label_attention_mask = torch.cumsum(label_attention_mask, dim=-1)
+        lens = cum_label_attention_mask[:, -1]
+        #  assert attention is like 11110000
+        _lens_m_1 = torch.argmax(
+            cum_label_attention_mask,
+            dim=-1,
+        )
+        assert torch.all(lens == _lens_m_1 + 1)
+
+        lens = lens.cpu().tolist()
+        best_score = [best_score[i][: lens[i]] for i in range(len(best_score))]
+        entropy = entropy.cpu().tolist()
+        entropy = [entropy[i][: lens[i]] for i in range(len(entropy))]
+
         rq.put(
             {
                 **batch,
                 "best_dist_q": best_dist_q,
                 "best_sum_score": best_sum_score,
+                "best_score": best_score,
+                "lens": lens,
+                "entropy": entropy,
             }
         )

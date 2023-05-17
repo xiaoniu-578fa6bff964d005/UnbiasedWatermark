@@ -28,7 +28,7 @@ def pipeline():
     task_worker_ = Process(
         target=merged_task_worker,
         args=(get_in_ds, "data/text_summarization.txt", tq),
-        kwargs={"batch_size": 8, "watermark_only": True},
+        kwargs={"batch_size": 128, "watermark_only": True},
     )
 
     score_worker_ = [
