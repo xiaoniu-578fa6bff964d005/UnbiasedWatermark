@@ -322,8 +322,12 @@ import torch
 def get_ppl(model, tbatch):
     input_ids = tbatch["input"]["input_ids"].to(model.device)
     attention_mask = tbatch["input"]["attention_mask"].to(model.device)
-    labels = tbatch["output"]["input_ids"][..., 1:].to(model.device)
-    outputs = model(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
+    decoder_input_ids = tbatch["output"]["input_ids"][..., :-1].to(model.device)
+    outputs = model(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        decoder_input_ids=decoder_input_ids,
+    )
 
     from torch.nn import CrossEntropyLoss
 
@@ -331,6 +335,7 @@ def get_ppl(model, tbatch):
 
     #  output.logits: [batch_size, sequence_length, vocab_size]
     #  labels: [batch_size, sequence_length]
+    labels = tbatch["output"]["input_ids"][..., 1:].to(model.device)
     shape = labels.shape
     #  loss: [batch_size, sequence_length]
     losses = loss_fct(
