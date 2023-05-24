@@ -2,6 +2,7 @@ def get_wps():
     from unbiased_watermark import (
         Delta_Reweight,
         Gamma_Reweight,
+        DeltaGumbel_Reweight,
         WatermarkLogitsProcessor,
         PrevN_ContextCodeExtractor,
     )
@@ -18,6 +19,11 @@ def get_wps():
     gamma_wp = WatermarkLogitsProcessor(
         private_key,
         Gamma_Reweight(),
+        PrevN_ContextCodeExtractor(5),
+    )
+    deltagumbel_wp = WatermarkLogitsProcessor(
+        private_key,
+        DeltaGumbel_Reweight(),
         PrevN_ContextCodeExtractor(5),
     )
     import copy
@@ -40,7 +46,15 @@ def get_wps():
         )
         for delta in [0.0, 1.0, 2.0]
     ]
-    return [None, delta_wp, gamma_wp, delta_wp_woh, gamma_wp_woh, *john_wps]
+    return [
+        None,
+        delta_wp,
+        gamma_wp,
+        delta_wp_woh,
+        gamma_wp_woh,
+        *john_wps,
+        deltagumbel_wp,
+    ]
 
 
 def get_num_gpus():
@@ -65,7 +79,13 @@ def batched_wp_task_worker(tq, get_in_ds, batch_size=8):
 
 
 def merged_task_worker(
-    get_in_ds, output_filepath, tq, batch_size=8, watermark_only=False, wh_only=False
+    get_in_ds,
+    output_filepath,
+    tq,
+    batch_size=8,
+    watermark_only=False,
+    wh_only=False,
+    no_gumbel=False,
 ):
     in_ds = get_in_ds()
 
@@ -84,6 +104,9 @@ def merged_task_worker(
                 continue
         if wh_only:
             if ", True)" in wp_str:
+                continue
+        if no_gumbel:
+            if "Gumbel" in wp_str:
                 continue
         for batch in tqdm(ds.iter(batch_size=batch_size), total=len(ds) // batch_size):
             tq.put(batch)
@@ -386,7 +409,7 @@ def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
 
 
 @torch.no_grad()
-def get_score(model, tbatch, wp, score, test_config={}):
+def get_score(model, tbatch, wp, scorer, test_config={}, la_wp=None):
     input_ids = tbatch["input"]["input_ids"].to(model.device)
     attention_mask = tbatch["input"]["attention_mask"].to(model.device)
     #  labels : [batch_size, output_sequence_length-1]
@@ -424,14 +447,23 @@ def get_score(model, tbatch, wp, score, test_config={}):
     with torch.cuda.device(model.device):
         torch.cuda.empty_cache()
     old_logits = torch.clone(logits)
-    new_logits = torch.clone(logits)
+    scores = torch.zeros(
+        logits.shape[:-1] + (scorer.query_size(),), device=logits.device
+    )
+    if la_wp is not None:
+        la_scores = torch.zeros(logits.shape[:-1], device=logits.device)
+    else:
+        la_scores = None
     for i in range(logits.size(1)):
         pre = decoder_input_ids[:, : i + 1]
         t = logits[:, i]
         t = logits_processor(pre, t)
         t = logits_warper(pre, t)
         old_logits[:, i] = t
-        new_logits[:, i] = wp(pre, t)
+        new_logits = wp(pre, t)
+        scores[:, i] = wp.get_score(labels[:, i], old_logits[:, i], new_logits, scorer)
+        if la_wp is not None:
+            la_scores[:, i] = la_wp.get_la_score(pre, labels[:, i], logits.shape[-1])
     del logits
 
     # compute entropy
@@ -441,33 +473,11 @@ def get_score(model, tbatch, wp, score, test_config={}):
     _logits.nan_to_num_()
     entropy = -(torch.exp(_logits) * _logits).sum(dim=-1)
 
-    # compute score
-    from unbiased_watermark import RobustLLR_Score_Batch_v1, RobustLLR_Score_Batch_v2
-
-    if isinstance(score, RobustLLR_Score_Batch_v1):
-        #  all_scores: [batch_size, output_sequence_length-1, query_size, vocab_size]
-        all_scores = score.score(old_logits, new_logits)
-        #  query_ids: [batch_size, output_sequence_length-1, query_size]
-        query_ids = labels.unsqueeze(-1).expand(
-            tuple(-1 for _ in range(decoder_input_ids.ndim)) + (all_scores.size(-2),)
-        )
-        #  scores: [batch_size, output_sequence_length-1, query_size]
-        scores = torch.gather(all_scores, -1, query_ids.unsqueeze(-1)).squeeze(-1)
-    elif isinstance(score, RobustLLR_Score_Batch_v2):
-        #  llr: [batch_size, output_sequence_length-1, vocab_size]
-        #  max_llr: [batch_size, output_sequence_length-1, query_size]
-        llr, max_llr, min_llr = score.score(old_logits, new_logits)
-        #  query_ids: [batch_size, output_sequence_length-1]
-        query_ids = labels
-        #  unclipped_scores: [batch_size, output_sequence_length-1]
-        unclipped_scores = torch.gather(llr, -1, query_ids.unsqueeze(-1)).squeeze(-1)
-        #  scores: [batch_size, output_sequence_length-1, query_size]
-        scores = torch.clamp(unclipped_scores.unsqueeze(-1), min_llr, max_llr)
-    return (
-        scores * label_attention_mask.unsqueeze(-1),
-        entropy * label_attention_mask,
-        label_attention_mask,
-    )
+    scores = scores * label_attention_mask.unsqueeze(-1)
+    if la_wp is not None:
+        la_scores = la_scores * label_attention_mask
+    entropy = entropy * label_attention_mask
+    return scores, entropy, label_attention_mask, la_scores
 
 
 def score_worker(tq, tqe, rq, gpu_id, model_str):
@@ -495,6 +505,7 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
         from unbiased_watermark import (
             Delta_Reweight,
             Gamma_Reweight,
+            DeltaGumbel_Reweight,
             WatermarkLogitsProcessor,
             PrevN_ContextCodeExtractor,
         )
@@ -502,6 +513,13 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
         wp_str = batch["watermark_processor"][0]
         wp = eval(wp_str)
         wp.ignore_history = True
+        if "get_la_score" in dir(wp.reweight):
+            import copy
+
+            la_wp = copy.deepcopy(wp)
+            la_wp.ignore_history = False
+        else:
+            la_wp = None
 
         tbatch = tokenize_batch(
             batch,
@@ -511,7 +529,9 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
         # score: [batch_size, sequence_length, query_size]
         # entropy: [batch_size, sequence_length]
         # label_attention_mask: [batch_size, sequence_length]
-        score, entropy, label_attention_mask = get_score(model, tbatch, wp, scorer)
+        score, entropy, label_attention_mask, la_score = get_score(
+            model, tbatch, wp, scorer, la_wp=la_wp
+        )
 
         import gc
 
@@ -543,6 +563,13 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
             .cpu()
             .tolist()
         )
+        # la_score: [batch_size, sequence_length]
+        if la_score is not None:
+            sum_la_score = la_score.sum(-1).cpu().tolist()
+            la_score = la_score.cpu().tolist()
+        else:
+            la_score = [[]] * len(best_dist_q)
+            sum_la_score = [None] * len(best_dist_q)
         #  lens: [batch_size]
         cum_label_attention_mask = torch.cumsum(label_attention_mask, dim=-1)
         lens = cum_label_attention_mask[:, -1]
@@ -555,6 +582,7 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
 
         lens = lens.cpu().tolist()
         best_score = [best_score[i][: lens[i]] for i in range(len(best_score))]
+        la_score = [la_score[i][: lens[i]] for i in range(len(la_score))]
         entropy = entropy.cpu().tolist()
         entropy = [entropy[i][: lens[i]] for i in range(len(entropy))]
 
@@ -564,6 +592,8 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
                 "best_dist_q": best_dist_q,
                 "best_sum_score": best_sum_score,
                 "best_score": best_score,
+                "la_score": la_score,
+                "sum_la_score": sum_la_score,
                 "lens": lens,
                 "entropy": entropy,
             }
@@ -624,7 +654,7 @@ def score_worker2(tq, tqe, rq, gpu_id, test_config):
         # score: [batch_size, sequence_length, query_size]
         # entropy: [batch_size, sequence_length]
         # label_attention_mask: [batch_size, sequence_length]
-        score, entropy, label_attention_mask = get_score(
+        score, entropy, label_attention_mask, _ = get_score(
             model, tbatch, wp, scorer, test_config
         )
 

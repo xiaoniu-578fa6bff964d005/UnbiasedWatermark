@@ -81,7 +81,12 @@ def _pipeline2(test_config, rq):
     task_worker_ = Process(
         target=merged_task_worker,
         args=(get_in_ds, "data/machine_translation.txt", tq),
-        kwargs={"batch_size": 8, "watermark_only": True, "wh_only": True},
+        kwargs={
+            "batch_size": 8,
+            "watermark_only": True,
+            "wh_only": True,
+            "no_gumbel": True,
+        },
     )
 
     score_worker_ = [
@@ -140,15 +145,19 @@ def pipeline2():
         default_test_config["wp_str"] = repr(wp)
         _pipeline2(default_test_config, rq)
         for temperature in [0.5, 1.5]:
+            print("sensitivity to temperature", temperature)
             _pipeline2({**default_test_config, "temperature": temperature}, rq)
 
         for top_k in [20, 100, 0]:
+            print("sensitivity to top_k", top_k)
             _pipeline2({**default_test_config, "top_k": top_k}, rq)
 
         for no_input in [True]:
+            print("sensitivity to no_input", no_input)
             _pipeline2({**default_test_config, "no_input": no_input}, rq)
 
         for model_str in []:  # don't know alternative model so far
+            print("sensitivity to model", model_str)
             _pipeline2({**default_test_config, "model_str": model_str}, rq)
 
     rqe.set()

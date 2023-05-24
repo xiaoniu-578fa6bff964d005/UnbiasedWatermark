@@ -67,6 +67,10 @@ def compute_bleu():
             from tqdm import tqdm
 
             num = 10000
+            if os.environ.get("EXP_DEBUG", None) == "1":
+                num = 2
+            if os.environ.get("EXP_DEBUG", None) == "2":
+                num = 100
             for r in tqdm(
                 executor.map(
                     bleu_task,

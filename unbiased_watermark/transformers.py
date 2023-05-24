@@ -40,33 +40,88 @@ class WatermarkLogitsProcessor(LogitsProcessor):
     def reset_history(self):
         self.cc_history = set()
 
-    def __call__(self, input_ids: LongTensor, scores: FloatTensor) -> FloatTensor:
+    def _get_codes(self, input_ids: LongTensor):
         batch_size = input_ids.size(0)
         context_codes = [
             self.context_code_extractor.extract(input_ids[i]) for i in range(batch_size)
         ]
 
-        mask, rng = zip(
+        mask, seeds = zip(
             *[
-                (
-                    context_code in self.cc_history,
-                    torch.Generator(device=scores.device).manual_seed(
-                        self.get_rng_seed(context_code)
-                    ),
-                )
+                (context_code in self.cc_history, self.get_rng_seed(context_code))
                 for context_code in context_codes
             ]
         )
-        rng = list(rng)
+        return mask, seeds
+
+    def _core(self, input_ids: LongTensor, scores: FloatTensor):
+        mask, seeds = self._get_codes(input_ids)
+        rng = [
+            torch.Generator(device=scores.device).manual_seed(seed) for seed in seeds
+        ]
         mask = torch.tensor(mask, device=scores.device)
         watermark_code = self.reweight.watermark_code_type.from_random(
             rng, scores.size(1)
         )
         reweighted_scores = self.reweight.reweight_logits(watermark_code, scores)
+        return mask, reweighted_scores
+
+    def __call__(self, input_ids: LongTensor, scores: FloatTensor) -> FloatTensor:
+        mask, reweighted_scores = self._core(input_ids, scores)
         if self.ignore_history:
             return reweighted_scores
         else:
             return torch.where(mask[:, None], scores, reweighted_scores)
+
+    def get_score(
+        self,
+        labels: LongTensor,
+        old_logits: FloatTensor,
+        new_logits: FloatTensor,
+        scorer,
+    ) -> FloatTensor:
+        from unbiased_watermark import (
+            RobustLLR_Score_Batch_v1,
+            RobustLLR_Score_Batch_v2,
+        )
+
+        if isinstance(scorer, RobustLLR_Score_Batch_v1):
+            all_scores = scorer.score(old_logits, new_logits)
+            query_ids = labels.unsqueeze(-1).expand(
+                tuple(-1 for _ in range(decoder_input_ids.ndim))
+                + (all_scores.size(-2),)
+            )
+            #  scores: [batch_size, query_size]
+            scores = torch.gather(all_scores, -1, query_ids.unsqueeze(-1)).squeeze(-1)
+        elif isinstance(scorer, RobustLLR_Score_Batch_v2):
+            llr, max_llr, min_llr = scorer.score(old_logits, new_logits)
+            query_ids = labels
+            unclipped_scores = torch.gather(llr, -1, query_ids.unsqueeze(-1)).squeeze(
+                -1
+            )
+            #  scores: [batch_size, query_size]
+            scores = torch.clamp(unclipped_scores.unsqueeze(-1), min_llr, max_llr)
+        return scores
+
+    def get_la_score(
+        self,
+        input_ids: LongTensor,
+        labels: LongTensor,
+        vocab_size: int,
+    ) -> FloatTensor:
+        assert "get_la_score" in dir(
+            self.reweight
+        ), "Reweight does not support likelihood agnostic detection"
+        mask, seeds = self._get_codes(input_ids)
+        rng = [
+            torch.Generator(device=input_ids.device).manual_seed(seed) for seed in seeds
+        ]
+        mask = torch.tensor(mask, device=input_ids.device)
+        watermark_code = self.reweight.watermark_code_type.from_random(rng, vocab_size)
+        all_scores = self.reweight.get_la_score(watermark_code)
+        scores = torch.gather(all_scores, -1, labels.unsqueeze(-1)).squeeze(-1)
+        scores = torch.logical_not(mask).float() * scores
+        return scores
 
 
 def get_score(

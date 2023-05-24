@@ -13,6 +13,9 @@ class RobustLLR_Score_Batch_Base:
     def __init__(self, batch_query):
         self.batch_query = batch_query
 
+    def query_size(self):
+        return len(self.batch_query)
+
     @classmethod
     def from_grid(cls, dist_ps: npt.ArrayLike, dist_qs: npt.ArrayLike):
         dist_ps = np.array(dist_ps)

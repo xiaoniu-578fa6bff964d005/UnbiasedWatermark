@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import torch
 from torch import FloatTensor
 from torch.nn import functional as F
