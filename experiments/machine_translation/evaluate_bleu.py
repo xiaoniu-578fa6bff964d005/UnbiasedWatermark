@@ -67,6 +67,8 @@ def compute_bleu():
             from tqdm import tqdm
 
             num = 10000
+            import os
+
             if os.environ.get("EXP_DEBUG", None) == "1":
                 num = 2
             if os.environ.get("EXP_DEBUG", None) == "2":
