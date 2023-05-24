@@ -29,3 +29,7 @@ if __name__ == "__main__":
     ts.evaluate_score.pipeline()
     print("mt.evaluate_score.pipeline()")
     mt.evaluate_score.pipeline()
+    print("ts.evaluate_score.pipeline2()")
+    ts.evaluate_score.pipeline2()
+    print("mt.evaluate_score.pipeline2()")
+    mt.evaluate_score.pipeline2()

@@ -65,7 +65,7 @@ def batched_wp_task_worker(tq, get_in_ds, batch_size=8):
 
 
 def merged_task_worker(
-    get_in_ds, output_filepath, tq, batch_size=8, watermark_only=False
+    get_in_ds, output_filepath, tq, batch_size=8, watermark_only=False, wh_only=False
 ):
     in_ds = get_in_ds()
 
@@ -81,6 +81,9 @@ def merged_task_worker(
     for ds, wp_str in zip(dss, wps):
         if watermark_only:
             if "John" in wp_str or "None" == wp_str:
+                continue
+        if wh_only:
+            if ", True)" in wp_str:
                 continue
         for batch in tqdm(ds.iter(batch_size=batch_size), total=len(ds) // batch_size):
             tq.put(batch)
@@ -383,7 +386,7 @@ def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
 
 
 @torch.no_grad()
-def get_score(model, tbatch, wp, score):
+def get_score(model, tbatch, wp, score, test_config={}):
     input_ids = tbatch["input"]["input_ids"].to(model.device)
     attention_mask = tbatch["input"]["attention_mask"].to(model.device)
     #  labels : [batch_size, output_sequence_length-1]
@@ -400,6 +403,10 @@ def get_score(model, tbatch, wp, score):
     from transformers import GenerationConfig
 
     generation_config = GenerationConfig.from_model_config(model.config)
+    if "temperature" in test_config:
+        generation_config.temperature = test_config["temperature"]
+    if "top_k" in test_config:
+        generation_config.top_k = test_config["top_k"]
     logits_processor = model._get_logits_processor(
         generation_config,
         input_ids_seq_length=labels.shape[-1],
@@ -559,5 +566,121 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
                 "best_score": best_score,
                 "lens": lens,
                 "entropy": entropy,
+            }
+        )
+
+
+def score_worker2(tq, tqe, rq, gpu_id, test_config):
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
+    from transformers import LogitsProcessorList, TemperatureLogitsWarper
+
+    model_str = test_config["model_str"]
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_str).to(f"cuda:{gpu_id}")
+    tokenizer = AutoTokenizer.from_pretrained(model_str)
+
+    from unbiased_watermark import RobustLLR_Score_Batch_v1, RobustLLR_Score_Batch_v2
+
+    grid_size = 10
+    dist_qs = [i / grid_size for i in range(0, grid_size + 1)]
+    scorer = RobustLLR_Score_Batch_v2.from_grid([0.0], dist_qs)
+
+    from queue import Empty
+
+    wp_str = test_config["wp_str"]
+    from unbiased_watermark import (
+        Delta_Reweight,
+        Gamma_Reweight,
+        WatermarkLogitsProcessor,
+        PrevN_ContextCodeExtractor,
+    )
+
+    wp = eval(wp_str)
+    wp.ignore_history = True
+
+    while not (tqe.is_set() and tq.empty()):
+        try:
+            batch = tq.get(timeout=1)
+        except Empty as e:
+            continue
+        assert len(set(batch["watermark_processor"])) == 1
+        if batch["watermark_processor"][0].split(",")[-3] != wp_str.split(",")[-3]:
+            # not same watermark type
+            continue
+
+        from unbiased_watermark import (
+            Delta_Reweight,
+            Gamma_Reweight,
+            WatermarkLogitsProcessor,
+            PrevN_ContextCodeExtractor,
+        )
+
+        if "no_input" in test_config and test_config["no_input"]:
+            batch["input"] = [""] * len(batch["input"])
+        tbatch = tokenize_batch(
+            batch,
+            tokenizer,
+            ["input", "output"],
+        )
+        # score: [batch_size, sequence_length, query_size]
+        # entropy: [batch_size, sequence_length]
+        # label_attention_mask: [batch_size, sequence_length]
+        score, entropy, label_attention_mask = get_score(
+            model, tbatch, wp, scorer, test_config
+        )
+
+        import gc
+
+        gc.collect()
+        # score: [batch_size, query_size]
+        sum_score = score.sum(-2)
+        # best_index: [batch_size]
+        best_index = torch.argmax(sum_score, dim=-1)
+        best_dist_q = [dist_qs[i] for i in best_index.cpu().tolist()]
+        best_sum_score = (
+            torch.gather(
+                sum_score,
+                -1,
+                best_index.unsqueeze(-1),
+            )
+            .squeeze(-1)
+            .cpu()
+            .tolist()
+        )
+
+        # best_score: [batch_size, sequence_length]
+        best_score = (
+            torch.gather(
+                score,
+                -1,
+                best_index.unsqueeze(-1).unsqueeze(-1).expand(-1, score.size(-2), -1),
+            )
+            .squeeze(-1)
+            .cpu()
+            .tolist()
+        )
+        #  lens: [batch_size]
+        cum_label_attention_mask = torch.cumsum(label_attention_mask, dim=-1)
+        lens = cum_label_attention_mask[:, -1]
+        #  assert attention is like 11110000
+        _lens_m_1 = torch.argmax(
+            cum_label_attention_mask,
+            dim=-1,
+        )
+        assert torch.all(lens == _lens_m_1 + 1)
+
+        lens = lens.cpu().tolist()
+        best_score = [best_score[i][: lens[i]] for i in range(len(best_score))]
+        entropy = entropy.cpu().tolist()
+        entropy = [entropy[i][: lens[i]] for i in range(len(entropy))]
+
+        rq.put(
+            {
+                **batch,
+                "best_dist_q": best_dist_q,
+                "best_sum_score": best_sum_score,
+                "best_score": best_score,
+                "lens": lens,
+                "entropy": entropy,
+                "test_config": [test_config] * len(batch["input"]),
             }
         )
