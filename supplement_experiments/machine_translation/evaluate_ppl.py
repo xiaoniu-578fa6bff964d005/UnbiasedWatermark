@@ -1,11 +1,11 @@
 def pipeline():
-    from experiments.common import set_spawn
+    from supplement_experiments.common import set_spawn
 
     set_spawn()
 
     from torch.multiprocessing import Process, Queue, Event
 
-    from experiments.common import get_num_gpus
+    from supplement_experiments.common import get_num_gpus
 
     num_gpus = get_num_gpus()
 
@@ -16,7 +16,7 @@ def pipeline():
     r2q = Queue()
     r2qe = Event()
 
-    from experiments.common import (
+    from supplement_experiments.common import (
         merged_task_worker,
         ppl_worker,
         remove_text_worker,
@@ -34,7 +34,11 @@ def pipeline():
     ppl_worker_ = [
         Process(
             target=ppl_worker,
-            args=(tq, tqe, rq, i, "facebook/mbart-large-en-ro"),
+            #  args=(tq, tqe, rq, i, "facebook/mbart-large-en-ro"),
+            args=(tq, tqe, rq, i, "t5-large"),
+            kwargs={
+                "task_prefix": "translate English to Romanian: ",
+            },
         )
         for i in range(num_gpus)
     ]

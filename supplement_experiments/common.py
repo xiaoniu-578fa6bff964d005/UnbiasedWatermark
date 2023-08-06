@@ -67,7 +67,7 @@ def get_num_gpus():
 def batched_wp_task_worker(tq, get_in_ds, batch_size=8):
     ds = get_in_ds()
 
-    from experiments.common import get_wps
+    from supplement_experiments.common import get_wps
 
     wps = get_wps()
 
@@ -151,7 +151,9 @@ def group_batch(batch):
     return {k: [v] for k, v in batch.items()}
 
 
-def tokenize_batch(example, tokenizer, fields=["input"], max_length: int | dict = 512):
+def tokenize_batch(
+    example, tokenizer, fields=["input"], max_length: int | dict = 512, task_prefix=""
+):
     result = {}
 
     if tokenizer.name_or_path == "facebook/mbart-large-en-ro":
@@ -167,7 +169,8 @@ def tokenize_batch(example, tokenizer, fields=["input"], max_length: int | dict 
             if field in ["output", "reference"]:
                 kwargs["text_target"] = example[field]
             else:
-                kwargs["text"] = example[field]
+                #  kwargs["text"] = example[field]
+                kwargs["text"] = [task_prefix + s for s in example[field]]
             if field == "output":
                 kwargs["add_special_tokens"] = False
             result[field] = tokenizer(
@@ -190,18 +193,23 @@ def set_spawn():
 
 
 def remove_tailing_pad_s(s: str):
-    index = s.find("<pad>")
-    if index == -1:
-        return s
-    else:
-        return s[:index]
+    while s.endswith("<pad>"):
+        s = s[:-5]
+    return s
+    #  index = s.find("<pad>")
+    #  if index == -1:
+    #      return s
+    #  else:
+    #      return s[:index]
 
 
 def remove_tailing_pad(strs: list[str]):
     return [remove_tailing_pad_s(s) for s in strs]
 
 
-def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
+def transformer_worker(
+    tq, tqe, rq, gpu_id, model_str, generation_kwargs={}, task_prefix=""
+):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
@@ -219,7 +227,7 @@ def transformer_worker(tq, tqe, rq, gpu_id, model_str, generation_kwargs={}):
         except Empty as e:
             continue
         batch = task["batch"]
-        tbatch = tokenize_batch(batch, tokenizer)
+        tbatch = tokenize_batch(batch, tokenizer, task_prefix=task_prefix)
         wp = task["watermark_processor"]
         lps = []
         if wp is not None:
@@ -377,7 +385,7 @@ def get_ppl(model, tbatch):
     return ppl
 
 
-def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
+def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str, task_prefix=""):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
@@ -395,6 +403,7 @@ def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str):
             batch,
             tokenizer,
             ["input", "output"],
+            task_prefix=task_prefix,
         )
         ppl = get_ppl(model, tbatch)
         with torch.cuda.device(model.device):
@@ -480,7 +489,7 @@ def get_score(model, tbatch, wp, scorer, test_config={}, la_wp=None):
     return scores, entropy, label_attention_mask, la_scores
 
 
-def score_worker(tq, tqe, rq, gpu_id, model_str):
+def score_worker(tq, tqe, rq, gpu_id, model_str, task_prefix=""):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
@@ -525,6 +534,7 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
             batch,
             tokenizer,
             ["input", "output"],
+            task_prefix=task_prefix,
         )
         # score: [batch_size, sequence_length, query_size]
         # entropy: [batch_size, sequence_length]
@@ -600,7 +610,7 @@ def score_worker(tq, tqe, rq, gpu_id, model_str):
         )
 
 
-def score_worker2(tq, tqe, rq, gpu_id, test_config):
+def score_worker2(tq, tqe, rq, gpu_id, test_config, task_prefix=""):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
@@ -650,6 +660,7 @@ def score_worker2(tq, tqe, rq, gpu_id, test_config):
             batch,
             tokenizer,
             ["input", "output"],
+            task_prefix=task_prefix,
         )
         # score: [batch_size, sequence_length, query_size]
         # entropy: [batch_size, sequence_length]

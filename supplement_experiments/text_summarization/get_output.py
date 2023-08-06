@@ -1,11 +1,11 @@
 def pipeline():
-    from experiments.common import set_spawn
+    from supplement_experiments.common import set_spawn
 
     set_spawn()
 
     from torch.multiprocessing import Process, Queue, Event
 
-    from experiments.common import get_num_gpus
+    from supplement_experiments.common import get_num_gpus
 
     num_gpus = get_num_gpus()
 
@@ -14,7 +14,7 @@ def pipeline():
     rq = Queue()
     rqe = Event()
 
-    from experiments.common import batched_wp_task_worker, transformer_worker
+    from supplement_experiments.common import batched_wp_task_worker, transformer_worker
     from . import get_in_ds
 
     task_worker_ = Process(
@@ -36,7 +36,7 @@ def pipeline():
         )
         for i in range(num_gpus)
     ]
-    from experiments.common import simple_store_worker
+    from supplement_experiments.common import simple_store_worker
 
     store_worker = Process(
         target=simple_store_worker, args=("data/text_summarization.txt", rq, rqe)

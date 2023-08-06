@@ -1,11 +1,11 @@
 def pipeline():
-    from experiments.common import set_spawn
+    from supplement_experiments.common import set_spawn
 
     set_spawn()
 
     from torch.multiprocessing import Process, Queue, Event
 
-    from experiments.common import get_num_gpus
+    from supplement_experiments.common import get_num_gpus
 
     num_gpus = get_num_gpus()
 
@@ -18,7 +18,7 @@ def pipeline():
     r2q = Queue()
     r2qe = Event()
 
-    from experiments.common import (
+    from supplement_experiments.common import (
         merged_task_worker,
         bertscore_worker,
         rouge_worker,

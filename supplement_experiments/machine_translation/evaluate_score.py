@@ -1,11 +1,11 @@
 def pipeline():
-    from experiments.common import set_spawn
+    from supplement_experiments.common import set_spawn
 
     set_spawn()
 
     from torch.multiprocessing import Process, Queue, Event
 
-    from experiments.common import get_num_gpus
+    from supplement_experiments.common import get_num_gpus
 
     num_gpus = get_num_gpus()
 
@@ -16,7 +16,7 @@ def pipeline():
     r2q = Queue()
     r2qe = Event()
 
-    from experiments.common import (
+    from supplement_experiments.common import (
         merged_task_worker,
         score_worker,
         remove_text_worker,
@@ -67,14 +67,14 @@ def pipeline():
 def _pipeline2(test_config, rq):
     from torch.multiprocessing import Process, Queue, Event
 
-    from experiments.common import get_num_gpus
+    from supplement_experiments.common import get_num_gpus
 
     num_gpus = get_num_gpus()
 
     tq = Queue(maxsize=num_gpus)
     tqe = Event()
 
-    from experiments.common import merged_task_worker, score_worker2
+    from supplement_experiments.common import merged_task_worker, score_worker2
 
     from . import get_in_ds
 
@@ -110,7 +110,7 @@ def _pipeline2(test_config, rq):
 
 
 def pipeline2():
-    from experiments.common import set_spawn
+    from supplement_experiments.common import set_spawn
 
     set_spawn()
 
@@ -121,7 +121,7 @@ def pipeline2():
     r2q = Queue()
     r2qe = Event()
 
-    from experiments.common import remove_text_worker, simple_store_worker
+    from supplement_experiments.common import remove_text_worker, simple_store_worker
 
     rt_worker = Process(target=remove_text_worker, args=(rq, rqe, r2q))
     store_worker = Process(
@@ -138,7 +138,7 @@ def pipeline2():
         "model_str": "facebook/mbart-large-en-ro",
     }
 
-    from experiments.common import get_wps
+    from supplement_experiments.common import get_wps
 
     wps = get_wps()[3:5]
     for wp in wps:

@@ -31,7 +31,7 @@ def get_merged_ds(path):
     out_ds = load_dataset("json", data_files={"test": path})["test"]
     out_ds = out_ds.sort("id")
 
-    from experiments.common import add_reference, group_batch
+    from supplement_experiments.common import add_reference, group_batch
 
     ds = add_reference(in_ds, out_ds)
     return ds
