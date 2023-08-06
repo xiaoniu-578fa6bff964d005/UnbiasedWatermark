@@ -27,10 +27,16 @@ def pipeline():
             target=transformer_worker,
             args=(tq, tqe, rq, i),
             kwargs={
-                "model_str": "philschmid/bart-large-cnn-samsum",
+                #  "model_str": "meta-llama/Llama-2-7b-chat-hf",
+                "model_str": "daryl149/llama-2-7b-chat-hf",
+                "decoder_only": True,
                 "generation_kwargs": {
-                    "max_length": 128,
+                    "max_new_tokens": 128,
                     "temperature": 1.0,
+                },
+                "tokenization_kwargs": {
+                    "task_template": "{input}\nTLDR:",
+                    "max_length": 3072,
                 },
             },
         )

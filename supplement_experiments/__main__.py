@@ -3,6 +3,13 @@ from . import machine_translation as mt
 
 
 def add_watermark_exp():
+    print("ts.get_output.pipeline()")
+    ts.get_output.pipeline()
+    print("ts.evaluate.pipeline()")
+    ts.evaluate.pipeline()
+    print("ts.evaluate_ppl.pipeline()")
+    ts.evaluate_ppl.pipeline()
+
     print("mt.get_output.pipeline()")
     mt.get_output.pipeline()
     print("mt.evaluate.pipeline()")

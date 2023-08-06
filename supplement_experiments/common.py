@@ -152,12 +152,22 @@ def group_batch(batch):
 
 
 def tokenize_batch(
-    example, tokenizer, fields=["input"], max_length: int | dict = 512, task_prefix=""
+    example,
+    tokenizer,
+    fields=["input"],
+    max_length: int | dict = 512,
+    task_template: str | dict = {},
+    padding_side={},
 ):
+    if isinstance(task_template, str):
+        #  like "{input}"
+        task_template = {"input": task_template}
     result = {}
 
     if tokenizer.name_or_path == "facebook/mbart-large-en-ro":
         tokenizer.tgt_lang = "ro_RO"
+    if tokenizer.name_or_path == "daryl149/llama-2-7b-chat-hf":
+        tokenizer.pad_token = tokenizer.eos_token
 
     for field in fields:
         if field in example:
@@ -166,13 +176,20 @@ def tokenize_batch(
                 kwargs["max_length"] = max_length[field]
             else:
                 kwargs["max_length"] = max_length
-            if field in ["output", "reference"]:
-                kwargs["text_target"] = example[field]
+            if field in task_template:
+                texts = [
+                    task_template[field].format(**{field: s}) for s in example[field]
+                ]
             else:
-                #  kwargs["text"] = example[field]
-                kwargs["text"] = [task_prefix + s for s in example[field]]
+                texts = example[field]
+            if field in ["output", "reference"]:
+                kwargs["text_target"] = texts
+            else:
+                kwargs["text"] = texts
             if field == "output":
                 kwargs["add_special_tokens"] = False
+            if field in padding_side:
+                kwargs["padding_side"] = padding_side[field]
             result[field] = tokenizer(
                 **kwargs,
                 truncation=True,
@@ -208,14 +225,25 @@ def remove_tailing_pad(strs: list[str]):
 
 
 def transformer_worker(
-    tq, tqe, rq, gpu_id, model_str, generation_kwargs={}, task_prefix=""
+    tq,
+    tqe,
+    rq,
+    gpu_id,
+    model_str,
+    generation_kwargs={},
+    decoder_only=False,
+    tokenization_kwargs={},
 ):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
+    from transformers import AutoModelForCausalLM
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
     from unbiased_watermark import patch_model
 
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_str).to(f"cuda:{gpu_id}")
+    if decoder_only:
+        model = AutoModelForCausalLM.from_pretrained(model_str).to(f"cuda:{gpu_id}")
+    else:
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_str).to(f"cuda:{gpu_id}")
     patch_model(model)
     tokenizer = AutoTokenizer.from_pretrained(model_str)
 
@@ -227,7 +255,7 @@ def transformer_worker(
         except Empty as e:
             continue
         batch = task["batch"]
-        tbatch = tokenize_batch(batch, tokenizer, task_prefix=task_prefix)
+        tbatch = tokenize_batch(batch, tokenizer, **tokenization_kwargs)
         wp = task["watermark_processor"]
         lps = []
         if wp is not None:
@@ -255,6 +283,9 @@ def transformer_worker(
             logits_warper=LogitsProcessorList(lps),
             **generation_kwargs,
         )
+
+        if decoder_only:
+            outputs_ids = outputs_ids[:, tbatch["input"]["input_ids"].shape[1] :]
         outputs = tokenizer.batch_decode(outputs_ids, skip_special_tokens=False)
         outputs = remove_tailing_pad(outputs)
         display_outputs = tokenizer.batch_decode(outputs_ids, skip_special_tokens=True)
@@ -353,30 +384,50 @@ import torch
 
 
 @torch.no_grad()
-def get_ppl(model, tbatch):
-    input_ids = tbatch["input"]["input_ids"].to(model.device)
-    attention_mask = tbatch["input"]["attention_mask"].to(model.device)
-    decoder_input_ids = tbatch["output"]["input_ids"][..., :-1].to(model.device)
-    outputs = model(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        decoder_input_ids=decoder_input_ids,
-    )
+def get_ppl(model, tbatch, decoder_only=False):
+    if not decoder_only:
+        input_ids = tbatch["input"]["input_ids"].to(model.device)
+        attention_mask = tbatch["input"]["attention_mask"].to(model.device)
+        decoder_input_ids = tbatch["output"]["input_ids"][..., :-1].to(model.device)
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            decoder_input_ids=decoder_input_ids,
+        )
+        #  labels: [batch_size, sequence_length]
+        labels = tbatch["output"]["input_ids"][..., 1:].to(model.device)
+        label_attention_mask = tbatch["output"]["attention_mask"][..., 1:].to(
+            model.device
+        )
+        #  output.logits: [batch_size, sequence_length, vocab_size]
+        logits = outputs.logits
+    else:
+        com_input_ids = torch.cat(
+            [tbatch["input"]["input_ids"], tbatch["output"]["input_ids"][..., :-1]],
+            dim=-1,
+        ).to(model.device)
+        com_attention_mask = torch.cat(
+            [
+                tbatch["input"]["attention_mask"],
+                tbatch["output"]["attention_mask"][..., :-1],
+            ],
+            dim=-1,
+        ).to(model.device)
+        outputs = model(input_ids=com_input_ids, attention_mask=com_attention_mask)
+        labels = tbatch["output"]["input_ids"].to(model.device)
+        label_attention_mask = tbatch["output"]["attention_mask"].to(model.device)
+        logits = outputs.logits[:, tbatch["input"]["input_ids"].shape[1] - 1 :]
 
     from torch.nn import CrossEntropyLoss
 
     loss_fct = CrossEntropyLoss(reduction="none")
 
-    #  output.logits: [batch_size, sequence_length, vocab_size]
-    #  labels: [batch_size, sequence_length]
-    labels = tbatch["output"]["input_ids"][..., 1:].to(model.device)
     shape = labels.shape
     #  loss: [batch_size, sequence_length]
     losses = loss_fct(
-        outputs.logits.reshape(-1, outputs.logits.shape[-1]),
+        logits.reshape(-1, logits.shape[-1]),
         labels.view(-1),
     ).reshape(shape)
-    label_attention_mask = tbatch["output"]["attention_mask"][..., 1:].to(model.device)
     #  loss: [batch_size]
     losses = (losses * label_attention_mask.float()).sum(
         dim=-1
@@ -385,11 +436,27 @@ def get_ppl(model, tbatch):
     return ppl
 
 
-def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str, task_prefix=""):
+def ppl_worker(
+    tq,
+    tqe,
+    rq,
+    gpu_id,
+    oracle_model_str,
+    decoder_only=False,
+    tokenization_kwargs={},
+):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
+    from transformers import AutoModelForCausalLM
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
-    model = AutoModelForSeq2SeqLM.from_pretrained(oracle_model_str).to(f"cuda:{gpu_id}")
+    if decoder_only:
+        model = AutoModelForCausalLM.from_pretrained(oracle_model_str).to(
+            f"cuda:{gpu_id}"
+        )
+    else:
+        model = AutoModelForSeq2SeqLM.from_pretrained(oracle_model_str).to(
+            f"cuda:{gpu_id}"
+        )
     tokenizer = AutoTokenizer.from_pretrained(oracle_model_str)
 
     from queue import Empty
@@ -403,9 +470,9 @@ def ppl_worker(tq, tqe, rq, gpu_id, oracle_model_str, task_prefix=""):
             batch,
             tokenizer,
             ["input", "output"],
-            task_prefix=task_prefix,
+            **tokenization_kwargs,
         )
-        ppl = get_ppl(model, tbatch)
+        ppl = get_ppl(model, tbatch, decoder_only=decoder_only)
         with torch.cuda.device(model.device):
             torch.cuda.empty_cache()
 
@@ -489,7 +556,7 @@ def get_score(model, tbatch, wp, scorer, test_config={}, la_wp=None):
     return scores, entropy, label_attention_mask, la_scores
 
 
-def score_worker(tq, tqe, rq, gpu_id, model_str, task_prefix=""):
+def score_worker(tq, tqe, rq, gpu_id, model_str, tokenization_kwargs={}):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
@@ -534,7 +601,7 @@ def score_worker(tq, tqe, rq, gpu_id, model_str, task_prefix=""):
             batch,
             tokenizer,
             ["input", "output"],
-            task_prefix=task_prefix,
+            **tokenization_kwargs,
         )
         # score: [batch_size, sequence_length, query_size]
         # entropy: [batch_size, sequence_length]
@@ -610,7 +677,7 @@ def score_worker(tq, tqe, rq, gpu_id, model_str, task_prefix=""):
         )
 
 
-def score_worker2(tq, tqe, rq, gpu_id, test_config, task_prefix=""):
+def score_worker2(tq, tqe, rq, gpu_id, test_config, tokenization_kwargs={}):
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
     from transformers import LogitsProcessorList, TemperatureLogitsWarper
 
@@ -660,7 +727,7 @@ def score_worker2(tq, tqe, rq, gpu_id, test_config, task_prefix=""):
             batch,
             tokenizer,
             ["input", "output"],
-            task_prefix=task_prefix,
+            **tokenization_kwargs,
         )
         # score: [batch_size, sequence_length, query_size]
         # entropy: [batch_size, sequence_length]

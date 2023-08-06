@@ -29,10 +29,12 @@ def pipeline():
             kwargs={
                 #  "model_str": "facebook/mbart-large-en-ro",
                 "model_str": "t5-large",
-                "task_prefix": "translate English to Romanian: ",
                 "generation_kwargs": {
                     "max_length": 512,
                     "temperature": 1.0,
+                },
+                "tokenization_kwargs": {
+                    "task_template": "translate English to Romanian: {input}",
                 },
             },
         )

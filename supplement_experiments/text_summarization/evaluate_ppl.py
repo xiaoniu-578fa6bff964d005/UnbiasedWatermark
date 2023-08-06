@@ -34,7 +34,25 @@ def pipeline():
     ppl_worker_ = [
         Process(
             target=ppl_worker,
-            args=(tq, tqe, rq, i, "facebook/bart-large-cnn"),
+            #  args=(tq, tqe, rq, i, "facebook/bart-large-cnn"),
+            #  kwargs={
+            #      "tokenization_kwargs": {
+            #          "task_template": {
+            #              "output": "</s><s><s><s>{output}",
+            #          },
+            #      },
+            #  },
+            args=(tq, tqe, rq, i),
+            kwargs={
+                "oracle_model_str": "daryl149/llama-2-7b-chat-hf",
+                "decoder_only": True,
+                "tokenization_kwargs": {
+                    "task_template": {
+                        "input": "{input}\nTLDR:",
+                    },
+                    "max_length": 3072,
+                },
+            },
         )
         for i in range(num_gpus)
     ]

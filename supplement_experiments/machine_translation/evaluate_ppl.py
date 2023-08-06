@@ -37,7 +37,9 @@ def pipeline():
             #  args=(tq, tqe, rq, i, "facebook/mbart-large-en-ro"),
             args=(tq, tqe, rq, i, "t5-large"),
             kwargs={
-                "task_prefix": "translate English to Romanian: ",
+                "tokenization_kwargs": {
+                    "task_template": "translate English to Romanian: {input}",
+                },
             },
         )
         for i in range(num_gpus)
