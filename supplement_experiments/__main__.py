@@ -1,10 +1,16 @@
+from . import poem_generation as poem
 from . import text_summarization as ts
 from . import machine_translation as mt
 
 
 def add_watermark_exp():
-    print("ts.get_output.pipeline()")
-    ts.get_output.pipeline()
+    #  print("poem.get_output.pipeline()")
+    #  poem.get_output.pipeline()
+    #  print("poem.evaluate_ppl.pipeline()")
+    #  poem.evaluate_ppl.pipeline()
+
+    #  print("ts.get_output.pipeline()")
+    #  ts.get_output.pipeline()
     print("ts.evaluate.pipeline()")
     ts.evaluate.pipeline()
     print("ts.evaluate_ppl.pipeline()")

@@ -27,7 +27,7 @@ def pipeline():
 
     task_worker_ = Process(
         target=merged_task_worker,
-        args=(get_in_ds, "data/text_summarization.txt", tq),
+        args=(get_in_ds, "data/poem_generation.txt", tq),
         kwargs={"batch_size": 2},
     )
 
@@ -47,9 +47,7 @@ def pipeline():
                 "oracle_model_str": "daryl149/llama-2-7b-chat-hf",
                 "decoder_only": True,
                 "tokenization_kwargs": {
-                    "task_template": {
-                        "input": "{input}\nTLDR:",
-                    },
+                    "task_template": "{input}\nGenerate a poem based on the above theme:",
                     "max_length": 3072,
                 },
             },
@@ -59,7 +57,7 @@ def pipeline():
     rt_worker = Process(target=remove_text_worker, args=(rq, rqe, r2q))
     store_worker = Process(
         target=simple_store_worker,
-        args=("data/text_summarization_ppl.txt", r2q, r2qe),
+        args=("data/poem_generation_ppl.txt", r2q, r2qe),
     )
 
     task_worker_.start()
