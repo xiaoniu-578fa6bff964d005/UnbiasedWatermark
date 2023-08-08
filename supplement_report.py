@@ -83,19 +83,49 @@ def sample_df_2_stat(df, bootstrap=False, show_wp=None):
     return sdf
 
 
+def filter_noout(df):
+    # delete rows where df['display_output'] is '' after strip
+    df = df[df["display_output"].str.strip() != ""]
+    return df
+
+
 def compute_poem():
     task = "poem_generation"
+    print(task)
     df = get_sample_df(data_path, task)
+    df = filter_noout(df)
     df = df.assign(show_wp_name=df["watermark_processor"].apply(get_show_wp_name))
 
     stat = sample_df_2_stat(df)
-    #  print(sample_df_2_stat(tsdf[['show_wp_name','bertscore.precision','bertscore.recall','rouge2','rougeL']], show_wp=show_wp).to_latex())
     print(stat)
-    pass
+
+
+def compute_ts():
+    task = "text_summarization"
+    print(task)
+    df = get_sample_df(data_path, task)
+    df = filter_noout(df)
+    df = df.assign(show_wp_name=df["watermark_processor"].apply(get_show_wp_name))
+
+    stat = sample_df_2_stat(df)
+    print(stat)
+
+
+def compute_mt():
+    task = "machine_translation"
+    print(task)
+    df = get_sample_df(data_path, task)
+    df = filter_noout(df)
+    df = df.assign(show_wp_name=df["watermark_processor"].apply(get_show_wp_name))
+
+    stat = sample_df_2_stat(df)
+    print(stat)
 
 
 def main():
     compute_poem()
+    compute_ts()
+    compute_mt()
 
 
 if __name__ == "__main__":

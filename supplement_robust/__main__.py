@@ -5,14 +5,14 @@ import torch
 from unbiased_watermark import patch_model
 
 
-def prepare_inputs(tokenizer, total_size, input_length):
+def prepare_inputs(tokenizer, total_size, input_length, batch_id=0):
     # return an input_ids tensor (total_size, input_length)
     # truncate from cnn_dailymail dataset
     from datasets import load_dataset
 
     cnn_daily = load_dataset("cnn_dailymail", "3.0.0").shuffle(seed=42)
     ds = cnn_daily["test"]
-    ds = ds.select(range(total_size))
+    ds = ds.select(range(batch_id * total_size, (batch_id + 1) * total_size))
     texts = list(ds["article"])
 
     if tokenizer.name_or_path in ["daryl149/llama-2-7b-chat-hf", "gpt2"]:
@@ -209,7 +209,9 @@ def get_auc(score_vanilla, score_positive):
 model_str = "gpt2"
 gpu_id = 0
 #  total_size = 64
-total_size = 512
+#  total_size = 512
+num_batch = 4
+total_size = 512 * num_batch
 #  input_length = 32
 #  output_length = 32
 input_length = 16
@@ -233,46 +235,64 @@ def main():
     patch_model(model)
     tokenizer = AutoTokenizer.from_pretrained(model_str)
 
-    input_ids = prepare_inputs(tokenizer, total_size, input_length).to(f"cuda:{gpu_id}")
+    aucs = []
+    for batch_id in range(num_batch):
+        input_ids = prepare_inputs(
+            tokenizer, int(total_size / num_batch), input_length, batch_id
+        ).to(f"cuda:{gpu_id}")
 
-    wps = get_wps()
-    wp_strs = [repr(wp) for wp in wps]
+        wps = get_wps()
+        wp_strs = [repr(wp) for wp in wps]
 
-    outputs = {}
-    for wp_str, wp in zip(wp_strs, wps):
-        print(wp_str)
-        output_ids = generate_output_ids(model, input_ids, wp, output_length)
-        outputs[wp_str] = output_ids
+        outputs = {}
+        for wp_str, wp in zip(wp_strs, wps):
+            print(wp_str)
+            output_ids = generate_output_ids(model, input_ids, wp, output_length)
+            outputs[wp_str] = output_ids
 
-    interference_strength = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
-    auc = {}
-    for wp_str, wp in zip(wp_strs, wps):
-        if wp_str not in outputs:
-            continue
-        if "None" == wp_str:
-            continue
-        auc[wp_str] = {}
+        interference_strength = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+        auc = {}
+        for wp_str, wp in zip(wp_strs, wps):
+            if wp_str not in outputs:
+                continue
+            if "None" == wp_str:
+                continue
+            auc[wp_str] = {}
+            for strength in interference_strength:
+                set_seed(42)
+                perturnbed_ids = randomly_substitute(
+                    outputs[wp_str], tokenizer.vocab_size, strength
+                )
+
+                if "Reweight" in wp_str:
+                    score = get_score(model, input_ids, wp, perturnbed_ids)
+                    vanilla_score = get_score(model, input_ids, wp, outputs["None"])
+                elif "John" in wp_str:
+                    score = [
+                        get_z_score(tokenizer, model.device, i, o)
+                        for i, o in zip(input_ids, perturnbed_ids)
+                    ]
+                    vanilla_score = [
+                        get_z_score(tokenizer, model.device, i, o)
+                        for i, o in zip(input_ids, outputs["None"])
+                    ]
+                auc[wp_str][strength] = get_auc(vanilla_score, score)
+            print(get_show_name(wp_str))
+            print("\t", auc[wp_str])
+        aucs.append(auc)
+
+    from prettytable import PrettyTable
+    import numpy as np
+
+    x = PrettyTable()
+    x.field_names = [""] + [str(strength) for strength in interference_strength]
+    for wp_str in aucs[0]:
+        data = []
         for strength in interference_strength:
-            set_seed(42)
-            perturnbed_ids = randomly_substitute(
-                outputs[wp_str], tokenizer.vocab_size, strength
-            )
-
-            if "Reweight" in wp_str:
-                score = get_score(model, input_ids, wp, perturnbed_ids)
-                vanilla_score = get_score(model, input_ids, wp, outputs["None"])
-            elif "John" in wp_str:
-                score = [
-                    get_z_score(tokenizer, model.device, i, o)
-                    for i, o in zip(input_ids, perturnbed_ids)
-                ]
-                vanilla_score = [
-                    get_z_score(tokenizer, model.device, i, o)
-                    for i, o in zip(input_ids, outputs["None"])
-                ]
-            auc[wp_str][strength] = get_auc(vanilla_score, score)
-        print(get_show_name(wp_str))
-        print("\t", auc[wp_str])
+            l = [auc[wp_str][strength] for auc in aucs]
+            data.append(f"{np.mean(l):.4f}±{np.std(l):.4f}")
+        x.add_row([get_show_name(wp_str)] + data)
+    print(x)
 
 
 if __name__ == "__main__":
